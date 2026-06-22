@@ -12,9 +12,13 @@ import (
 	"github.com/fangimal/TeamTask/internal/config"
 	"github.com/fangimal/TeamTask/internal/delivery/router"
 	"github.com/fangimal/TeamTask/internal/logger"
+	mysqlrepo "github.com/fangimal/TeamTask/internal/repository/mysql"
 )
 
-const configPath = "configs/config.yaml"
+const (
+	configPath     = "configs/config.yaml"
+	migrationsPath = "file://migrations"
+)
 
 func main() {
 	cfg, err := config.Load(configPath)
@@ -24,9 +28,23 @@ func main() {
 	}
 
 	appLogger := logger.New(cfg.Logger)
+
+	database, err := mysqlrepo.NewDB(context.Background(), cfg.Database)
+	if err != nil {
+		appLogger.Error("failed to connect to database", slog.Any("error", err))
+		os.Exit(1)
+	}
+	defer database.Close()
+
+	if err = mysqlrepo.RunMigrations(cfg.Database, migrationsPath); err != nil {
+		appLogger.Error("failed to apply database migrations", slog.Any("error", err))
+		os.Exit(1)
+	}
+
+	repository := mysqlrepo.NewRepository(database)
 	httpServer := &http.Server{
 		Addr:         cfg.Server.Address(),
-		Handler:      router.New(appLogger),
+		Handler:      router.New(appLogger, repository),
 		ReadTimeout:  cfg.Server.ReadTimeout,
 		WriteTimeout: cfg.Server.WriteTimeout,
 		IdleTimeout:  cfg.Server.IdleTimeout,

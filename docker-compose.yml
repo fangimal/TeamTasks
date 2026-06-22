@@ -8,8 +8,10 @@ services:
     ports:
       - "${SERVER_PORT:-8080}:${SERVER_PORT:-8080}"
     depends_on:
-      - mysql
-      - redis
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - teamtasks
 
@@ -26,6 +28,11 @@ services:
       - "${DATABASE_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "${DATABASE_USER}", "-p${DATABASE_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     networks:
       - teamtasks
 

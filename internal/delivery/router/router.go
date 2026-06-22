@@ -8,9 +8,9 @@ import (
 	"github.com/fangimal/TeamTask/internal/delivery/http/middleware"
 )
 
-func New(logger *slog.Logger) http.Handler {
+func New(logger *slog.Logger, healthChecker httpdelivery.HealthChecker) http.Handler {
 	mux := http.NewServeMux()
-	healthHandler := httpdelivery.NewHealthHandler(logger)
+	healthHandler := httpdelivery.NewHealthHandler(logger, healthChecker)
 
 	mux.HandleFunc("GET /health", healthHandler.Check)
 
