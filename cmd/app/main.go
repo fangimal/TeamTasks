@@ -13,6 +13,7 @@ import (
 	"github.com/fangimal/TeamTask/internal/delivery/router"
 	"github.com/fangimal/TeamTask/internal/logger"
 	mysqlrepo "github.com/fangimal/TeamTask/internal/repository/mysql"
+	"github.com/fangimal/TeamTask/internal/usecase"
 )
 
 const (
@@ -42,9 +43,12 @@ func main() {
 	}
 
 	repository := mysqlrepo.NewRepository(database)
+	userRepository := mysqlrepo.NewUserRepository(database)
+	authUseCase := usecase.NewAuthUseCase(userRepository, cfg.JWT.Secret, cfg.JWT.Expiration)
+
 	httpServer := &http.Server{
 		Addr:         cfg.Server.Address(),
-		Handler:      router.New(appLogger, repository),
+		Handler:      router.New(appLogger, repository, authUseCase, cfg.JWT.Secret),
 		ReadTimeout:  cfg.Server.ReadTimeout,
 		WriteTimeout: cfg.Server.WriteTimeout,
 		IdleTimeout:  cfg.Server.IdleTimeout,

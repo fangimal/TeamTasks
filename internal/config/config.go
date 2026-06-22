@@ -15,6 +15,7 @@ type Config struct {
 	Database DatabaseConfig
 	Redis    RedisConfig
 	Logger   LoggerConfig
+	JWT      JWTConfig
 }
 
 type ServerConfig struct {
@@ -47,6 +48,11 @@ type RedisConfig struct {
 type LoggerConfig struct {
 	Level  string
 	Format string
+}
+
+type JWTConfig struct {
+	Secret     string
+	Expiration time.Duration
 }
 
 func Load(path string) (*Config, error) {
@@ -100,6 +106,10 @@ func defaultConfig() *Config {
 		Logger: LoggerConfig{
 			Level:  "info",
 			Format: "json",
+		},
+		JWT: JWTConfig{
+			Secret:     "change-me-in-env",
+			Expiration: 24 * time.Hour,
 		},
 	}
 }
@@ -173,6 +183,8 @@ func applyEnv(config *Config) error {
 	mapEnv(values, "redis.db", "REDIS_DB")
 	mapEnv(values, "logger.level", "LOGGER_LEVEL")
 	mapEnv(values, "logger.format", "LOGGER_FORMAT")
+	mapEnv(values, "jwt.secret", "JWT_SECRET")
+	mapEnv(values, "jwt.expiration", "JWT_EXPIRATION")
 
 	return applyValues(config, values)
 }
@@ -228,6 +240,10 @@ func applyValues(config *Config, values map[string]string) error {
 			config.Logger.Level = strings.ToLower(value)
 		case "logger.format":
 			config.Logger.Format = strings.ToLower(value)
+		case "jwt.secret":
+			config.JWT.Secret = value
+		case "jwt.expiration":
+			assignDuration(&config.JWT.Expiration, key, value, &errs)
 		default:
 			return fmt.Errorf("unknown config key %q", key)
 		}
