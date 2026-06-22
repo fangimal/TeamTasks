@@ -46,13 +46,15 @@ func main() {
 	userRepository := mysqlrepo.NewUserRepository(database)
 	teamRepository := mysqlrepo.NewTeamRepository(database)
 	teamMemberRepository := mysqlrepo.NewTeamMemberRepository(database)
+	taskRepository := mysqlrepo.NewTaskRepository(database)
 
 	authUseCase := usecase.NewAuthUseCase(userRepository, cfg.JWT.Secret, cfg.JWT.Expiration)
 	teamUseCase := usecase.NewTeamUseCase(teamRepository, teamMemberRepository, userRepository)
+	taskUseCase := usecase.NewTaskUseCase(taskRepository, teamMemberRepository)
 
 	httpServer := &http.Server{
 		Addr:         cfg.Server.Address(),
-		Handler:      router.New(appLogger, repository, authUseCase, teamUseCase, cfg.JWT.Secret),
+		Handler:      router.New(appLogger, repository, authUseCase, teamUseCase, taskUseCase, cfg.JWT.Secret),
 		ReadTimeout:  cfg.Server.ReadTimeout,
 		WriteTimeout: cfg.Server.WriteTimeout,
 		IdleTimeout:  cfg.Server.IdleTimeout,

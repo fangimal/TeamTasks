@@ -56,6 +56,17 @@ type Task struct {
 	UpdatedAt   time.Time
 }
 
+type TaskFilter struct {
+	TeamID     int64
+	Status     TaskStatus
+	AssigneeID int64
+}
+
+type Pagination struct {
+	Limit  int
+	Offset int
+}
+
 type TaskHistory struct {
 	ID        int64
 	TaskID    int64

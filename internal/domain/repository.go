@@ -28,6 +28,10 @@ type TeamMemberRepository interface {
 
 type TaskRepository interface {
 	HealthRepository
+	Create(ctx context.Context, task *Task) error
+	GetByID(ctx context.Context, id int64) (*Task, error)
+	Update(ctx context.Context, task *Task) error
+	GetList(ctx context.Context, filter TaskFilter, pagination Pagination) ([]*Task, int64, error)
 }
 
 type TaskHistoryRepository interface {

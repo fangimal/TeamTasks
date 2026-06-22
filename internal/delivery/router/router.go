@@ -14,6 +14,7 @@ func New(
 	healthChecker httpdelivery.HealthChecker,
 	authUseCase httpdelivery.AuthUseCase,
 	teamUseCase *usecase.TeamUseCase,
+	taskUseCase *usecase.TaskUseCase,
 	jwtSecret string,
 ) http.Handler {
 	mux := http.NewServeMux()
@@ -21,6 +22,7 @@ func New(
 	authHandler := httpdelivery.NewAuthHandler(logger, authUseCase)
 	protectedHandler := httpdelivery.NewProtectedHandler(logger)
 	teamHandler := httpdelivery.NewTeamHandler(logger, teamUseCase)
+	taskHandler := httpdelivery.NewTaskHandler(logger, taskUseCase)
 
 	mux.HandleFunc("GET /health", healthHandler.Check)
 	mux.HandleFunc("POST /api/v1/register", authHandler.Register)
@@ -31,6 +33,11 @@ func New(
 	mux.Handle("POST /api/v1/teams", authMiddleware(http.HandlerFunc(teamHandler.CreateTeam)))
 	mux.Handle("GET /api/v1/teams", authMiddleware(http.HandlerFunc(teamHandler.GetUserTeams)))
 	mux.Handle("POST /api/v1/teams/{id}/invite", authMiddleware(http.HandlerFunc(teamHandler.InviteUser)))
+
+	mux.Handle("POST /api/v1/tasks", authMiddleware(http.HandlerFunc(taskHandler.CreateTask)))
+	mux.Handle("GET /api/v1/tasks", authMiddleware(http.HandlerFunc(taskHandler.GetTasks)))
+	mux.Handle("GET /api/v1/tasks/{id}", authMiddleware(http.HandlerFunc(taskHandler.GetTaskByID)))
+	mux.Handle("PUT /api/v1/tasks/{id}", authMiddleware(http.HandlerFunc(taskHandler.UpdateTask)))
 
 	return middleware.Logging(logger)(mux)
 }

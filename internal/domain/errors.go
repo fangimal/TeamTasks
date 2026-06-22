@@ -13,4 +13,7 @@ var (
 	ErrForbidden          = errors.New("insufficient permissions")
 	ErrCannotInviteOwner  = errors.New("cannot invite user as owner")
 	ErrInvalidRole        = errors.New("invalid role")
+	ErrTaskNotFound       = errors.New("task not found")
+	ErrNotTeamMember      = errors.New("user is not a member of the team")
+	ErrAssigneeNotInTeam  = errors.New("assignee is not a member of the team")
 )

@@ -1,6 +1,6 @@
 # TeamTasks
 
-REST API сервис для управления задачами в командах. Текущий этап: управление командами.
+REST API сервис для управления задачами в командах. Текущий этап: управление задачами.
 
 ## Ожидаемый функционал
 
@@ -16,10 +16,10 @@ REST API для совместной работы над задачами вну
 - [x] проверка прав доступа к задачам и командам;
 - [x] healthcheck через `/health`;
 - [ ] управление участниками команды (удаление, смена роли);
-- [ ] создание, просмотр, обновление и удаление задач;
-- [ ] назначение ответственного за задачу;
-- [ ] статусы задач: `todo`, `in_progress`, `done`;
-- [ ] фильтрация и пагинация списка задач;
+- [x] создание, просмотр, обновление задач;
+- [x] назначение ответственного за задачу;
+- [x] статусы задач: `todo`, `in_progress`, `done`;
+- [x] фильтрация и пагинация списка задач;
 - [ ] история изменений задач;
 - [ ] комментарии к задачам;
 - [ ] кэширование списков задач через Redis;
@@ -27,7 +27,7 @@ REST API для совместной работы над задачами вну
 - [ ] rate limiting и базовая отказоустойчивость;
 - [ ] Prometheus-метрики через `/metrics`.
 
-Текущее состояние проекта: реализована инфраструктура приложения, подключение к MySQL, миграции схемы БД, базовый слой Repository, проверка подключения к базе данных в `/health`, регистрация, логин, JWT middleware, создание команд, получение списка команд, приглашение участников с проверкой ролей.
+Текущее состояние проекта: реализована инфраструктура приложения, подключение к MySQL, миграции схемы БД, базовый слой Repository, проверка подключения к базе данных в `/health`, регистрация, логин, JWT middleware, создание команд, получение списка команд, приглашение участников с проверкой ролей, полный CRUD для задач с фильтрацией, пагинацией и проверкой прав доступа (RBAC).
 
 ## Требования
 
@@ -226,6 +226,98 @@ curl -i -X POST http://localhost:8080/api/v1/teams/1/invite \
   -d '{"email":"user2@test.com"}'
 # 409 Conflict
 ```
+
+### Задачи
+
+Создание задачи (автор должен быть участником команды):
+
+```bash
+TOKEN="<token-from-login>"
+curl -i -X POST http://localhost:8080/api/v1/tasks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"title":"Implement auth","description":"Add JWT auth","assignee_id":1,"team_id":1}'
+```
+
+Ожидаемый ответ: `201 Created` с данными задачи. Поля `status` и `description` опциональны (по умолчанию `todo` и пустая строка).
+
+Попытка создать задачу в команде, где пользователь не состоит:
+
+```bash
+curl -i -X POST http://localhost:8080/api/v1/tasks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"title":"Hack","assignee_id":1,"team_id":999}'
+```
+
+Ожидаемый ответ: `403 Forbidden` с сообщением "you are not a member of this team".
+
+Попытка назначить исполнителя, не состоящего в команде:
+
+```bash
+curl -i -X POST http://localhost:8080/api/v1/tasks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"title":"Bad assignee","assignee_id":999,"team_id":1}'
+```
+
+Ожидаемый ответ: `400 Bad Request` с сообщением "assignee is not a member of this team".
+
+Получение списка задач команды с фильтрацией и пагинацией:
+
+```bash
+curl -i "http://localhost:8080/api/v1/tasks?team_id=1&status=todo&limit=5&offset=0" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Ожидаемый ответ: `200 OK` с JSON вида:
+```json
+{
+  "data": [ { "id": 1, "title": "Implement auth", ... } ],
+  "total": 1,
+  "limit": 5,
+  "offset": 0
+}
+```
+
+Фильтр по исполнителю:
+
+```bash
+curl -i "http://localhost:8080/api/v1/tasks?team_id=1&assignee_id=1" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Получение задачи по ID:
+
+```bash
+curl -i http://localhost:8080/api/v1/tasks/1 \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Пользователь не из команды пытается получить задачу — `403 Forbidden`.
+
+Обновление задачи:
+
+```bash
+curl -i -X PUT http://localhost:8080/api/v1/tasks/1 \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"title":"Updated title","status":"in_progress"}'
+```
+
+Ожидаемый ответ: `200 OK` с обновлёнными данными задачи.
+
+Проверка RBAC — участник с ролью `member` пытается обновить чужую задачу (не является assignee и не автор):
+
+```bash
+TOKEN_MEMBER="<token-of-member-user-not-owner-of-task>"
+curl -i -X PUT http://localhost:8080/api/v1/tasks/1 \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN_MEMBER" \
+  -d '{"title":"Hacked"}'
+```
+
+Ожидаемый ответ: `403 Forbidden` с сообщением "insufficient permissions".
 
 Логи приложения:
 
