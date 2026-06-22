@@ -1,0 +1,44 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "${SERVER_PORT:-8080}:${SERVER_PORT:-8080}"
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - teamtasks
+
+  mysql:
+    image: mysql:9.7.1
+    env_file:
+      - .env
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DATABASE_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DATABASE_NAME}
+      MYSQL_USER: ${DATABASE_USER}
+      MYSQL_PASSWORD: ${DATABASE_PASSWORD}
+    ports:
+      - "${DATABASE_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - teamtasks
+
+  redis:
+    image: redis:8.8.0
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - teamtasks
+
+networks:
+  teamtasks:
+    driver: bridge
+
+volumes:
+  mysql_data:

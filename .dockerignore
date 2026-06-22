@@ -1,0 +1,12 @@
+.git
+.agents
+.codex
+.gocache
+.idea
+.vscode
+bin
+dist
+tmp
+*.exe
+*.test
+coverage.out
