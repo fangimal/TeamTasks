@@ -14,6 +14,16 @@ type UserRepository interface {
 
 type TeamRepository interface {
 	HealthRepository
+	CreateTeamWithOwner(ctx context.Context, team *Team, member *TeamMember) error
+	GetByID(ctx context.Context, id int64) (*Team, error)
+	GetByUserID(ctx context.Context, userID int64, limit int, offset int) ([]*Team, error)
+}
+
+type TeamMemberRepository interface {
+	HealthRepository
+	Create(ctx context.Context, member *TeamMember) error
+	GetByUserAndTeam(ctx context.Context, userID int64, teamID int64) (*TeamMember, error)
+	GetMembersByTeam(ctx context.Context, teamID int64) ([]*TeamMember, error)
 }
 
 type TaskRepository interface {
