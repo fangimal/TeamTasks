@@ -38,6 +38,7 @@ func New(
 	mux.Handle("GET /api/v1/tasks", authMiddleware(http.HandlerFunc(taskHandler.GetTasks)))
 	mux.Handle("GET /api/v1/tasks/{id}", authMiddleware(http.HandlerFunc(taskHandler.GetTaskByID)))
 	mux.Handle("PUT /api/v1/tasks/{id}", authMiddleware(http.HandlerFunc(taskHandler.UpdateTask)))
+	mux.Handle("GET /api/v1/tasks/{id}/history", authMiddleware(http.HandlerFunc(taskHandler.GetTaskHistory)))
 
 	return middleware.Logging(logger)(mux)
 }

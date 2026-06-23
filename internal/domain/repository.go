@@ -1,6 +1,9 @@
 package domain
 
-import "context"
+import (
+	"context"
+	"database/sql"
+)
 
 type HealthRepository interface {
 	Ping(ctx context.Context) error
@@ -30,12 +33,14 @@ type TaskRepository interface {
 	HealthRepository
 	Create(ctx context.Context, task *Task) error
 	GetByID(ctx context.Context, id int64) (*Task, error)
-	Update(ctx context.Context, task *Task) error
+	Update(ctx context.Context, tx *sql.Tx, task *Task) error
 	GetList(ctx context.Context, filter TaskFilter, pagination Pagination) ([]*Task, int64, error)
 }
 
 type TaskHistoryRepository interface {
 	HealthRepository
+	CreateBatch(ctx context.Context, tx *sql.Tx, records []*TaskHistory) error
+	GetByTaskID(ctx context.Context, taskID int64, limit, offset int) ([]*TaskHistory, error)
 }
 
 type TaskCommentRepository interface {

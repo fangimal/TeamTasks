@@ -3,11 +3,14 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/fangimal/TeamTask/internal/domain"
 )
+
+var errTxRequired = errors.New("transaction is required for update")
 
 type TaskRepository struct {
 	database *sql.DB
@@ -75,8 +78,12 @@ func (repository *TaskRepository) GetByID(ctx context.Context, id int64) (*domai
 	return task, nil
 }
 
-func (repository *TaskRepository) Update(ctx context.Context, task *domain.Task) error {
-	result, err := repository.database.ExecContext(
+func (repository *TaskRepository) Update(ctx context.Context, tx *sql.Tx, task *domain.Task) error {
+	if tx == nil {
+		return errTxRequired
+	}
+
+	result, err := tx.ExecContext(
 		ctx,
 		`UPDATE tasks SET title = ?, description = ?, status = ?, assignee_id = ?
 		WHERE id = ?`,

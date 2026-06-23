@@ -19,6 +19,7 @@ type TaskUseCase interface {
 	GetTaskByID(ctx context.Context, userID int64, taskID int64) (*usecase.TaskResponse, error)
 	GetTasks(ctx context.Context, userID int64, filter domain.TaskFilter, pagination domain.Pagination) (*usecase.TaskListResponse, error)
 	UpdateTask(ctx context.Context, userID int64, taskID int64, input usecase.UpdateTaskInput) (*usecase.TaskResponse, error)
+	GetTaskHistory(ctx context.Context, userID int64, taskID int64, limit int, offset int) (*usecase.TaskHistoryListResponse, error)
 }
 
 type TaskHandler struct {
@@ -189,6 +190,32 @@ func (handler *TaskHandler) UpdateTask(responseWriter http.ResponseWriter, reque
 
 	if err = response.JSON(responseWriter, http.StatusOK, task); err != nil {
 		handler.logger.ErrorContext(request.Context(), "failed to write update task response", slog.Any("error", err))
+	}
+}
+
+func (handler *TaskHandler) GetTaskHistory(responseWriter http.ResponseWriter, request *http.Request) {
+	userID, ok := middleware.UserIDFromContext(request.Context())
+	if !ok {
+		response.WriteError(handler.logger, responseWriter, request, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	taskID, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || taskID <= 0 {
+		response.WriteError(handler.logger, responseWriter, request, http.StatusBadRequest, "invalid task id")
+		return
+	}
+
+	limit, offset := parsePagination(request)
+
+	result, err := handler.tasks.GetTaskHistory(request.Context(), userID, taskID, limit, offset)
+	if err != nil {
+		handler.writeTaskError(responseWriter, request, err)
+		return
+	}
+
+	if err = response.JSON(responseWriter, http.StatusOK, result); err != nil {
+		handler.logger.ErrorContext(request.Context(), "failed to write get task history response", slog.Any("error", err))
 	}
 }
 

@@ -3,8 +3,10 @@ package usecase
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/fangimal/TeamTask/internal/domain"
 )
@@ -15,8 +17,10 @@ const (
 )
 
 type TaskUseCase struct {
-	tasks  domain.TaskRepository
+	tasks   domain.TaskRepository
 	members domain.TeamMemberRepository
+	history domain.TaskHistoryRepository
+	database *sql.DB
 }
 
 type CreateTaskInput struct {
@@ -53,10 +57,27 @@ type TaskListResponse struct {
 	Offset int             `json:"offset"`
 }
 
-func NewTaskUseCase(tasks domain.TaskRepository, members domain.TeamMemberRepository) *TaskUseCase {
+type TaskHistoryResponse struct {
+	ID        int64              `json:"id"`
+	TaskID    int64              `json:"task_id"`
+	ChangedBy int64              `json:"changed_by"`
+	ChangedAt string             `json:"changed_at"`
+	OldValue  json.RawMessage    `json:"old_value"`
+	NewValue  json.RawMessage    `json:"new_value"`
+}
+
+type TaskHistoryListResponse struct {
+	Data   []*TaskHistoryResponse `json:"data"`
+	Limit  int                   `json:"limit"`
+	Offset int                   `json:"offset"`
+}
+
+func NewTaskUseCase(tasks domain.TaskRepository, members domain.TeamMemberRepository, history domain.TaskHistoryRepository, database *sql.DB) *TaskUseCase {
 	return &TaskUseCase{
-		tasks:  tasks,
-		members: members,
+		tasks:    tasks,
+		members:  members,
+		history:  history,
+		database: database,
 	}
 }
 
@@ -161,7 +182,7 @@ func (useCase *TaskUseCase) GetTasks(ctx context.Context, userID int64, filter d
 }
 
 func (useCase *TaskUseCase) UpdateTask(ctx context.Context, userID int64, taskID int64, input UpdateTaskInput) (*TaskResponse, error) {
-	task, err := useCase.tasks.GetByID(ctx, taskID)
+	oldTask, err := useCase.tasks.GetByID(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, domain.ErrTaskNotFound) {
 			return nil, domain.ErrTaskNotFound
@@ -170,7 +191,7 @@ func (useCase *TaskUseCase) UpdateTask(ctx context.Context, userID int64, taskID
 		return nil, fmt.Errorf("get task: %w", err)
 	}
 
-	member, err := useCase.members.GetByUserAndTeam(ctx, userID, task.TeamID)
+	member, err := useCase.members.GetByUserAndTeam(ctx, userID, oldTask.TeamID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrForbidden
@@ -180,23 +201,25 @@ func (useCase *TaskUseCase) UpdateTask(ctx context.Context, userID int64, taskID
 	}
 
 	if member.Role == domain.TeamRoleMember {
-		if task.AssigneeID != userID && task.CreatedBy != userID {
+		if oldTask.AssigneeID != userID && oldTask.CreatedBy != userID {
 			return nil, domain.ErrForbidden
 		}
 	}
 
+	newTask := *oldTask
+
 	if input.Title != "" {
-		task.Title = input.Title
+		newTask.Title = input.Title
 	}
 	if input.Description != "" {
-		task.Description = input.Description
+		newTask.Description = input.Description
 	}
 	if input.Status != "" {
-		task.Status = input.Status
+		newTask.Status = input.Status
 	}
 	if input.AssigneeID > 0 {
-		if input.AssigneeID != task.AssigneeID {
-			_, err = useCase.members.GetByUserAndTeam(ctx, input.AssigneeID, task.TeamID)
+		if input.AssigneeID != oldTask.AssigneeID {
+			_, err = useCase.members.GetByUserAndTeam(ctx, input.AssigneeID, oldTask.TeamID)
 			if err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					return nil, domain.ErrAssigneeNotInTeam
@@ -206,19 +229,138 @@ func (useCase *TaskUseCase) UpdateTask(ctx context.Context, userID int64, taskID
 			}
 		}
 
-		task.AssigneeID = input.AssigneeID
+		newTask.AssigneeID = input.AssigneeID
 	}
 
-	if err = useCase.tasks.Update(ctx, task); err != nil {
+	records := buildHistoryRecords(oldTask, &newTask, userID)
+	if records == nil {
+		return taskToResponse(oldTask), nil
+	}
+
+	tx, err := useCase.database.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err = useCase.tasks.Update(ctx, tx, &newTask); err != nil {
 		return nil, fmt.Errorf("update task: %w", err)
 	}
 
-	task, err = useCase.tasks.GetByID(ctx, taskID)
+	if err = useCase.history.CreateBatch(ctx, tx, records); err != nil {
+		return nil, fmt.Errorf("create task history: %w", err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	task, err := useCase.tasks.GetByID(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("reload task: %w", err)
 	}
 
 	return taskToResponse(task), nil
+}
+
+func (useCase *TaskUseCase) GetTaskHistory(ctx context.Context, userID int64, taskID int64, limit int, offset int) (*TaskHistoryListResponse, error) {
+	if limit <= 0 {
+		limit = defaultTaskLimit
+	}
+	if offset < 0 {
+		offset = defaultTaskOffset
+	}
+
+	task, err := useCase.tasks.GetByID(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, domain.ErrTaskNotFound) {
+			return nil, domain.ErrTaskNotFound
+		}
+
+		return nil, fmt.Errorf("get task: %w", err)
+	}
+
+	_, err = useCase.members.GetByUserAndTeam(ctx, userID, task.TeamID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.ErrForbidden
+		}
+
+		return nil, fmt.Errorf("check membership: %w", err)
+	}
+
+	records, err := useCase.history.GetByTaskID(ctx, taskID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("get task history: %w", err)
+	}
+
+	response := &TaskHistoryListResponse{
+		Data:   make([]*TaskHistoryResponse, 0, len(records)),
+		Limit:  limit,
+		Offset: offset,
+	}
+
+	for _, record := range records {
+		response.Data = append(response.Data, &TaskHistoryResponse{
+			ID:        record.ID,
+			TaskID:    record.TaskID,
+			ChangedBy: record.ChangedBy,
+			ChangedAt: record.ChangedAt.Format("2006-01-02T15:04:05Z07:00"),
+			OldValue:  record.OldValue,
+			NewValue:  record.NewValue,
+		})
+	}
+
+	return response, nil
+}
+
+func buildHistoryRecords(oldTask, newTask *domain.Task, changedBy int64) []*domain.TaskHistory {
+	oldValues := make(map[string]any)
+	newValues := make(map[string]any)
+
+	if oldTask.Title != newTask.Title {
+		oldValues["title"] = oldTask.Title
+		newValues["title"] = newTask.Title
+	}
+
+	if oldTask.Description != newTask.Description {
+		oldValues["description"] = oldTask.Description
+		newValues["description"] = newTask.Description
+	}
+
+	if oldTask.Status != newTask.Status {
+		oldValues["status"] = oldTask.Status
+		newValues["status"] = newTask.Status
+	}
+
+	if oldTask.AssigneeID != newTask.AssigneeID {
+		oldValues["assignee_id"] = oldTask.AssigneeID
+		newValues["assignee_id"] = newTask.AssigneeID
+	}
+
+	if len(oldValues) == 0 {
+		return nil
+	}
+
+	oldJSON, err := json.Marshal(oldValues)
+	if err != nil {
+		return nil
+	}
+
+	newJSON, err := json.Marshal(newValues)
+	if err != nil {
+		return nil
+	}
+
+	return []*domain.TaskHistory{
+		{
+			TaskID:    newTask.ID,
+			ChangedBy: changedBy,
+			ChangedAt: time.Now(),
+			OldValue:  oldJSON,
+			NewValue:  newJSON,
+		},
+	}
 }
 
 func taskToResponse(task *domain.Task) *TaskResponse {

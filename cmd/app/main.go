@@ -47,10 +47,11 @@ func main() {
 	teamRepository := mysqlrepo.NewTeamRepository(database)
 	teamMemberRepository := mysqlrepo.NewTeamMemberRepository(database)
 	taskRepository := mysqlrepo.NewTaskRepository(database)
+	taskHistoryRepository := mysqlrepo.NewTaskHistoryRepository(database)
 
 	authUseCase := usecase.NewAuthUseCase(userRepository, cfg.JWT.Secret, cfg.JWT.Expiration)
 	teamUseCase := usecase.NewTeamUseCase(teamRepository, teamMemberRepository, userRepository)
-	taskUseCase := usecase.NewTaskUseCase(taskRepository, teamMemberRepository)
+	taskUseCase := usecase.NewTaskUseCase(taskRepository, teamMemberRepository, taskHistoryRepository, database)
 
 	httpServer := &http.Server{
 		Addr:         cfg.Server.Address(),
