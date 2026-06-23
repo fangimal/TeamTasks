@@ -1,6 +1,6 @@
 # TeamTasks
 
-REST API сервис для управления задачами в командах. Текущий этап: история изменений задач (аудит).
+REST API сервис для управления задачами в командах. Текущий этап: комментарии к задачам.
 
 ## Ожидаемый функционал
 
@@ -21,13 +21,13 @@ REST API для совместной работы над задачами вну
 - [x] статусы задач: `todo`, `in_progress`, `done`;
 - [x] фильтрация и пагинация списка задач;
 - [x] история изменений задач (аудит);
-- [ ] комментарии к задачам;
+- [x] комментарии к задачам;
 - [ ] кэширование списков задач через Redis;
 - [ ] сложные SQL-запросы для аналитики и выборок по командам;
 - [ ] rate limiting и базовая отказоустойчивость;
 - [ ] Prometheus-метрики через `/metrics`.
 
-Текущее состояние проекта: реализована инфраструктура приложения, подключение к MySQL, миграции схемы БД, базовый слой Repository, проверка подключения к базе данных в `/health`, регистрация, логин, JWT middleware, создание команд, получение списка команд, приглашение участников с проверкой ролей, полный CRUD для задач с фильтрацией, пагинацией и проверкой прав доступа (RBAC), аудит изменений задач с транзакционной записью в `task_history`.
+Текущее состояние проекта: реализована инфраструктура приложения, подключение к MySQL, миграции схемы БД, базовый слой Repository, проверка подключения к базе данных в `/health`, регистрация, логин, JWT middleware, создание команд, получение списка команд, приглашение участников с проверкой ролей, полный CRUD для задач с фильтрацией, пагинацией и проверкой прав доступа (RBAC), аудит изменений задач с транзакционной записью в `task_history`, комментарии к задачам с проверкой членства в команде.
 
 ## Требования
 
@@ -352,6 +352,73 @@ curl -i "http://localhost:8080/api/v1/tasks/1/history?limit=10&offset=0" \
 ```
 
 Пользователь, не состоящий в команде задачи, получает `403 Forbidden`.
+
+### Комментарии к задачам
+
+Создание комментария (участник команды):
+
+```bash
+curl -i -X POST http://localhost:8080/api/v1/tasks/1/comments \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"text":"Great job!"}'
+```
+
+Ожидаемый ответ: `201 Created` с данными комментария.
+
+Пользователь, не состоящий в команде задачи, получает `403 Forbidden`:
+
+```bash
+TOKEN_OTHER="<token-of-user-not-in-team>"
+curl -i -X POST http://localhost:8080/api/v1/tasks/1/comments \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN_OTHER" \
+  -d '{"text":"Hack"}'
+```
+
+Получение комментариев с пагинацией:
+
+```bash
+curl -i "http://localhost:8080/api/v1/tasks/1/comments?limit=5&offset=0" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Ожидаемый ответ `200 OK`:
+```json
+{
+  "data": [
+    {
+      "id": 1,
+      "task_id": 1,
+      "user_id": 1,
+      "text": "Great job!",
+      "created_at": "2026-06-23T12:00:00Z",
+      "updated_at": "2026-06-23T12:00:00Z"
+    }
+  ],
+  "total": 1,
+  "limit": 5,
+  "offset": 0
+}
+```
+
+Комментарий к несуществующей задаче возвращает `404 Not Found`:
+
+```bash
+curl -i -X POST http://localhost:8080/api/v1/tasks/9999/comments \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"text":"test"}'
+```
+
+Пустой текст комментария возвращает `400 Bad Request`:
+
+```bash
+curl -i -X POST http://localhost:8080/api/v1/tasks/1/comments \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"text":""}'
+```
 
 Логи приложения:
 

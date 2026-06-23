@@ -45,4 +45,7 @@ type TaskHistoryRepository interface {
 
 type TaskCommentRepository interface {
 	HealthRepository
+	Create(ctx context.Context, comment *TaskComment) error
+	GetByTaskID(ctx context.Context, taskID int64, limit, offset int) ([]*TaskComment, error)
+	CountByTaskID(ctx context.Context, taskID int64) (int64, error)
 }
