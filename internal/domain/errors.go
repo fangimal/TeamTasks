@@ -16,4 +16,5 @@ var (
 	ErrTaskNotFound       = errors.New("task not found")
 	ErrNotTeamMember      = errors.New("user is not a member of the team")
 	ErrAssigneeNotInTeam  = errors.New("assignee is not a member of the team")
+	ErrCacheMiss          = errors.New("cache miss")
 )

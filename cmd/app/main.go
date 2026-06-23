@@ -13,6 +13,7 @@ import (
 	"github.com/fangimal/TeamTask/internal/delivery/router"
 	"github.com/fangimal/TeamTask/internal/logger"
 	mysqlrepo "github.com/fangimal/TeamTask/internal/repository/mysql"
+	redisrepo "github.com/fangimal/TeamTask/internal/repository/redis"
 	"github.com/fangimal/TeamTask/internal/usecase"
 )
 
@@ -50,14 +51,23 @@ func main() {
 	taskHistoryRepository := mysqlrepo.NewTaskHistoryRepository(database)
 	taskCommentRepository := mysqlrepo.NewTaskCommentRepository(database)
 
+	redisClient, err := redisrepo.NewClient(cfg.Redis)
+	if err != nil {
+		appLogger.Error("failed to connect to redis", slog.Any("error", err))
+		os.Exit(1)
+	}
+	defer redisClient.Close()
+
+	taskCacheRepository := redisrepo.NewTaskCacheRepository(redisClient)
+
 	authUseCase := usecase.NewAuthUseCase(userRepository, cfg.JWT.Secret, cfg.JWT.Expiration)
 	teamUseCase := usecase.NewTeamUseCase(teamRepository, teamMemberRepository, userRepository)
-	taskUseCase := usecase.NewTaskUseCase(taskRepository, teamMemberRepository, taskHistoryRepository, database)
+	taskUseCase := usecase.NewTaskUseCase(taskRepository, teamMemberRepository, taskHistoryRepository, taskCacheRepository, database, appLogger)
 	commentUseCase := usecase.NewCommentUseCase(taskCommentRepository, taskRepository, teamMemberRepository)
 
 	httpServer := &http.Server{
 		Addr:         cfg.Server.Address(),
-		Handler:      router.New(appLogger, repository, authUseCase, teamUseCase, taskUseCase, commentUseCase, cfg.JWT.Secret),
+		Handler:      router.New(appLogger, repository, taskCacheRepository, authUseCase, teamUseCase, taskUseCase, commentUseCase, cfg.JWT.Secret),
 		ReadTimeout:  cfg.Server.ReadTimeout,
 		WriteTimeout: cfg.Server.WriteTimeout,
 		IdleTimeout:  cfg.Server.IdleTimeout,

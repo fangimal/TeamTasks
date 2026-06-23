@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/fangimal/TeamTask/internal/domain"
 )
+
+const cacheTTL = 5 * time.Minute
 
 const (
 	defaultTaskLimit  = 10
@@ -17,10 +20,12 @@ const (
 )
 
 type TaskUseCase struct {
-	tasks   domain.TaskRepository
-	members domain.TeamMemberRepository
-	history domain.TaskHistoryRepository
+	tasks    domain.TaskRepository
+	members  domain.TeamMemberRepository
+	history  domain.TaskHistoryRepository
+	cache    domain.TaskCacheRepository
 	database *sql.DB
+	logger   *slog.Logger
 }
 
 type CreateTaskInput struct {
@@ -39,15 +44,15 @@ type UpdateTaskInput struct {
 }
 
 type TaskResponse struct {
-	ID          int64              `json:"id"`
-	Title       string             `json:"title"`
-	Description string             `json:"description"`
-	Status      domain.TaskStatus  `json:"status"`
-	AssigneeID  int64              `json:"assignee_id"`
-	TeamID      int64              `json:"team_id"`
-	CreatedBy   int64              `json:"created_by"`
-	CreatedAt   string             `json:"created_at"`
-	UpdatedAt   string             `json:"updated_at"`
+	ID          int64             `json:"id"`
+	Title       string            `json:"title"`
+	Description string            `json:"description"`
+	Status      domain.TaskStatus `json:"status"`
+	AssigneeID  int64             `json:"assignee_id"`
+	TeamID      int64             `json:"team_id"`
+	CreatedBy   int64             `json:"created_by"`
+	CreatedAt   string            `json:"created_at"`
+	UpdatedAt   string            `json:"updated_at"`
 }
 
 type TaskListResponse struct {
@@ -58,26 +63,28 @@ type TaskListResponse struct {
 }
 
 type TaskHistoryResponse struct {
-	ID        int64              `json:"id"`
-	TaskID    int64              `json:"task_id"`
-	ChangedBy int64              `json:"changed_by"`
-	ChangedAt string             `json:"changed_at"`
-	OldValue  json.RawMessage    `json:"old_value"`
-	NewValue  json.RawMessage    `json:"new_value"`
+	ID        int64           `json:"id"`
+	TaskID    int64           `json:"task_id"`
+	ChangedBy int64           `json:"changed_by"`
+	ChangedAt string          `json:"changed_at"`
+	OldValue  json.RawMessage `json:"old_value"`
+	NewValue  json.RawMessage `json:"new_value"`
 }
 
 type TaskHistoryListResponse struct {
 	Data   []*TaskHistoryResponse `json:"data"`
-	Limit  int                   `json:"limit"`
-	Offset int                   `json:"offset"`
+	Limit  int                    `json:"limit"`
+	Offset int                    `json:"offset"`
 }
 
-func NewTaskUseCase(tasks domain.TaskRepository, members domain.TeamMemberRepository, history domain.TaskHistoryRepository, database *sql.DB) *TaskUseCase {
+func NewTaskUseCase(tasks domain.TaskRepository, members domain.TeamMemberRepository, history domain.TaskHistoryRepository, cache domain.TaskCacheRepository, database *sql.DB, logger *slog.Logger) *TaskUseCase {
 	return &TaskUseCase{
 		tasks:    tasks,
 		members:  members,
 		history:  history,
+		cache:    cache,
 		database: database,
+		logger:   logger,
 	}
 }
 
@@ -118,6 +125,16 @@ func (useCase *TaskUseCase) CreateTask(ctx context.Context, userID int64, input 
 
 	if err = useCase.tasks.Create(ctx, task); err != nil {
 		return nil, fmt.Errorf("create task: %w", err)
+	}
+
+	if useCase.cache != nil {
+		cachePattern := fmt.Sprintf("tasks:team:%d:*", input.TeamID)
+		if err = useCase.cache.Invalidate(ctx, cachePattern); err != nil {
+			useCase.logger.WarnContext(ctx, "cache invalidation failed after create task",
+				slog.Any("error", err),
+				slog.Int64("team_id", input.TeamID),
+			)
+		}
 	}
 
 	return taskToResponse(task), nil
@@ -162,6 +179,29 @@ func (useCase *TaskUseCase) GetTasks(ctx context.Context, userID int64, filter d
 		return nil, fmt.Errorf("check membership: %w", err)
 	}
 
+	if useCase.cache != nil {
+		cacheKey := buildCacheKey(filter, pagination)
+		cachedTasks, total, cacheErr := useCase.cache.Get(ctx, cacheKey)
+		if cacheErr == nil {
+			response := &TaskListResponse{
+				Data:   make([]*TaskResponse, 0, len(cachedTasks)),
+				Total:  total,
+				Limit:  pagination.Limit,
+				Offset: pagination.Offset,
+			}
+
+			for _, task := range cachedTasks {
+				response.Data = append(response.Data, taskToResponse(task))
+			}
+
+			return response, nil
+		}
+
+		if !errors.Is(cacheErr, domain.ErrCacheMiss) {
+			useCase.logger.WarnContext(ctx, "cache read failed", slog.Any("error", cacheErr))
+		}
+	}
+
 	tasks, total, err := useCase.tasks.GetList(ctx, filter, pagination)
 	if err != nil {
 		return nil, fmt.Errorf("get task list: %w", err)
@@ -178,7 +218,30 @@ func (useCase *TaskUseCase) GetTasks(ctx context.Context, userID int64, filter d
 		response.Data = append(response.Data, taskToResponse(task))
 	}
 
+	if useCase.cache != nil {
+		cacheKey := buildCacheKey(filter, pagination)
+		if err = useCase.cache.Set(ctx, cacheKey, tasks, total, cacheTTL); err != nil {
+			useCase.logger.WarnContext(ctx, "cache write failed", slog.Any("error", err))
+		}
+	}
+
 	return response, nil
+}
+
+func buildCacheKey(filter domain.TaskFilter, pagination domain.Pagination) string {
+	key := fmt.Sprintf("tasks:team:%d", filter.TeamID)
+
+	if filter.Status != "" {
+		key += fmt.Sprintf(":status:%s", filter.Status)
+	}
+
+	if filter.AssigneeID > 0 {
+		key += fmt.Sprintf(":assignee:%d", filter.AssigneeID)
+	}
+
+	key += fmt.Sprintf(":l:%d:o:%d", pagination.Limit, pagination.Offset)
+
+	return key
 }
 
 func (useCase *TaskUseCase) UpdateTask(ctx context.Context, userID int64, taskID int64, input UpdateTaskInput) (*TaskResponse, error) {
@@ -253,6 +316,16 @@ func (useCase *TaskUseCase) UpdateTask(ctx context.Context, userID int64, taskID
 
 	if err = tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	if useCase.cache != nil {
+		cachePattern := fmt.Sprintf("tasks:team:%d:*", oldTask.TeamID)
+		if err = useCase.cache.Invalidate(ctx, cachePattern); err != nil {
+			useCase.logger.WarnContext(ctx, "cache invalidation failed after update task",
+				slog.Any("error", err),
+				slog.Int64("team_id", oldTask.TeamID),
+			)
+		}
 	}
 
 	task, err := useCase.tasks.GetByID(ctx, taskID)

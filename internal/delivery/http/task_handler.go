@@ -28,18 +28,18 @@ type TaskHandler struct {
 }
 
 type createTaskRequest struct {
-	Title       string           `json:"title"`
-	Description string           `json:"description,omitempty"`
+	Title       string            `json:"title"`
+	Description string            `json:"description,omitempty"`
 	Status      domain.TaskStatus `json:"status,omitempty"`
-	AssigneeID  int64            `json:"assignee_id"`
-	TeamID      int64            `json:"team_id"`
+	AssigneeID  int64             `json:"assignee_id"`
+	TeamID      int64             `json:"team_id"`
 }
 
 type updateTaskRequest struct {
-	Title       string           `json:"title,omitempty"`
-	Description string           `json:"description,omitempty"`
+	Title       string            `json:"title,omitempty"`
+	Description string            `json:"description,omitempty"`
 	Status      domain.TaskStatus `json:"status,omitempty"`
-	AssigneeID  int64            `json:"assignee_id,omitempty"`
+	AssigneeID  int64             `json:"assignee_id,omitempty"`
 }
 
 func NewTaskHandler(logger *slog.Logger, tasks TaskUseCase) *TaskHandler {

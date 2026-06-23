@@ -11,7 +11,8 @@ import (
 
 func New(
 	logger *slog.Logger,
-	healthChecker httpdelivery.HealthChecker,
+	dbChecker httpdelivery.HealthChecker,
+	cacheChecker httpdelivery.HealthChecker,
 	authUseCase httpdelivery.AuthUseCase,
 	teamUseCase *usecase.TeamUseCase,
 	taskUseCase *usecase.TaskUseCase,
@@ -19,7 +20,7 @@ func New(
 	jwtSecret string,
 ) http.Handler {
 	mux := http.NewServeMux()
-	healthHandler := httpdelivery.NewHealthHandler(logger, healthChecker)
+	healthHandler := httpdelivery.NewHealthHandler(logger, dbChecker, cacheChecker)
 	authHandler := httpdelivery.NewAuthHandler(logger, authUseCase)
 	protectedHandler := httpdelivery.NewProtectedHandler(logger)
 	teamHandler := httpdelivery.NewTeamHandler(logger, teamUseCase)

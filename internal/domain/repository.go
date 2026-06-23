@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 	"database/sql"
+	"time"
 )
 
 type HealthRepository interface {
@@ -41,6 +42,13 @@ type TaskHistoryRepository interface {
 	HealthRepository
 	CreateBatch(ctx context.Context, tx *sql.Tx, records []*TaskHistory) error
 	GetByTaskID(ctx context.Context, taskID int64, limit, offset int) ([]*TaskHistory, error)
+}
+
+type TaskCacheRepository interface {
+	HealthRepository
+	Get(ctx context.Context, key string) ([]*Task, int64, error)
+	Set(ctx context.Context, key string, tasks []*Task, total int64, ttl time.Duration) error
+	Invalidate(ctx context.Context, pattern string) error
 }
 
 type TaskCommentRepository interface {
