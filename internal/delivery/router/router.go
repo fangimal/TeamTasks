@@ -17,6 +17,7 @@ func New(
 	teamUseCase *usecase.TeamUseCase,
 	taskUseCase *usecase.TaskUseCase,
 	commentUseCase *usecase.CommentUseCase,
+	analyticsUseCase *usecase.AnalyticsUseCase,
 	jwtSecret string,
 ) http.Handler {
 	mux := http.NewServeMux()
@@ -26,6 +27,7 @@ func New(
 	teamHandler := httpdelivery.NewTeamHandler(logger, teamUseCase)
 	taskHandler := httpdelivery.NewTaskHandler(logger, taskUseCase)
 	commentHandler := httpdelivery.NewCommentHandler(logger, commentUseCase)
+	analyticsHandler := httpdelivery.NewAnalyticsHandler(logger, analyticsUseCase)
 
 	mux.HandleFunc("GET /health", healthHandler.Check)
 	mux.HandleFunc("POST /api/v1/register", authHandler.Register)
@@ -45,6 +47,10 @@ func New(
 
 	mux.Handle("POST /api/v1/tasks/{id}/comments", authMiddleware(http.HandlerFunc(commentHandler.CreateComment)))
 	mux.Handle("GET /api/v1/tasks/{id}/comments", authMiddleware(http.HandlerFunc(commentHandler.GetComments)))
+
+	mux.Handle("GET /api/v1/analytics/team-stats", authMiddleware(http.HandlerFunc(analyticsHandler.GetTeamStats)))
+	mux.Handle("GET /api/v1/analytics/top-users", authMiddleware(http.HandlerFunc(analyticsHandler.GetTopUsers)))
+	mux.Handle("GET /api/v1/analytics/integrity-check", authMiddleware(http.HandlerFunc(analyticsHandler.GetIntegrityCheck)))
 
 	return middleware.Logging(logger)(mux)
 }

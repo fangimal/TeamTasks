@@ -84,3 +84,25 @@ type TaskComment struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
+
+type TeamStats struct {
+	TeamID             int64 `json:"team_id"`
+	TeamName           string `json:"team_name"`
+	MemberCount        int64 `json:"member_count"`
+	DoneTasksLast7Days int64 `json:"done_tasks_last_7_days"`
+}
+
+type TopUser struct {
+	TeamID    int64  `json:"team_id"`
+	UserID    int64  `json:"user_id"`
+	UserEmail string `json:"user_email"`
+	TaskCount int64  `json:"task_count"`
+	Rank      int64  `json:"rank"`
+}
+
+type IntegrityViolation struct {
+	TaskID     int64  `json:"task_id"`
+	TaskTitle  string `json:"task_title"`
+	AssigneeID int64  `json:"assignee_id"`
+	TeamID     int64  `json:"team_id"`
+}

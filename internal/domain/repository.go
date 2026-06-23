@@ -57,3 +57,10 @@ type TaskCommentRepository interface {
 	GetByTaskID(ctx context.Context, taskID int64, limit, offset int) ([]*TaskComment, error)
 	CountByTaskID(ctx context.Context, taskID int64) (int64, error)
 }
+
+type AnalyticsRepository interface {
+	HealthRepository
+	GetTeamStats(ctx context.Context) ([]*TeamStats, error)
+	GetTopUsersPerTeam(ctx context.Context) ([]*TopUser, error)
+	GetIntegrityViolations(ctx context.Context) ([]*IntegrityViolation, error)
+}

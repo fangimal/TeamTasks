@@ -64,10 +64,12 @@ func main() {
 	teamUseCase := usecase.NewTeamUseCase(teamRepository, teamMemberRepository, userRepository)
 	taskUseCase := usecase.NewTaskUseCase(taskRepository, teamMemberRepository, taskHistoryRepository, taskCacheRepository, database, appLogger)
 	commentUseCase := usecase.NewCommentUseCase(taskCommentRepository, taskRepository, teamMemberRepository)
+	analyticsRepository := mysqlrepo.NewAnalyticsRepository(database)
+	analyticsUseCase := usecase.NewAnalyticsUseCase(analyticsRepository)
 
 	httpServer := &http.Server{
 		Addr:         cfg.Server.Address(),
-		Handler:      router.New(appLogger, repository, taskCacheRepository, authUseCase, teamUseCase, taskUseCase, commentUseCase, cfg.JWT.Secret),
+		Handler:      router.New(appLogger, repository, taskCacheRepository, authUseCase, teamUseCase, taskUseCase, commentUseCase, analyticsUseCase, cfg.JWT.Secret),
 		ReadTimeout:  cfg.Server.ReadTimeout,
 		WriteTimeout: cfg.Server.WriteTimeout,
 		IdleTimeout:  cfg.Server.IdleTimeout,
