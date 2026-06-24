@@ -29,3 +29,11 @@ logger:
 jwt:
   secret: "change-me-in-env"
   expiration: "24h"
+
+rate_limit:
+  enabled: true
+  requests_per_minute: 100
+
+email_service:
+  url: "https://httpbin.org"
+  timeout: "5s"

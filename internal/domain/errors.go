@@ -17,4 +17,6 @@ var (
 	ErrNotTeamMember      = errors.New("user is not a member of the team")
 	ErrAssigneeNotInTeam  = errors.New("assignee is not a member of the team")
 	ErrCacheMiss          = errors.New("cache miss")
+	ErrCircuitBreakerOpen = errors.New("circuit breaker is open")
+	ErrRateLimitExceeded  = errors.New("rate limit exceeded")
 )

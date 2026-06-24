@@ -15,15 +15,11 @@ const (
 	defaultPageOffset = 0
 )
 
-type NotificationService interface {
-	SendInviteEmail(ctx context.Context, email string, teamName string) error
-}
-
 type TeamUseCase struct {
-	teams    domain.TeamRepository
-	members  domain.TeamMemberRepository
-	users    domain.UserRepository
-	notifier NotificationService
+	teams       domain.TeamRepository
+	members     domain.TeamMemberRepository
+	users       domain.UserRepository
+	emailSender domain.EmailSender
 }
 
 type teamMemberResponse struct {
@@ -54,12 +50,13 @@ func NewTeamUseCase(
 	teams domain.TeamRepository,
 	members domain.TeamMemberRepository,
 	users domain.UserRepository,
+	emailSender domain.EmailSender,
 ) *TeamUseCase {
 	return &TeamUseCase{
-		teams:    teams,
-		members:  members,
-		users:    users,
-		notifier: &consoleNotifier{},
+		teams:       teams,
+		members:     members,
+		users:       users,
+		emailSender: emailSender,
 	}
 }
 
@@ -100,7 +97,8 @@ func (useCase *TeamUseCase) GetUserTeams(ctx context.Context, userID int64, limi
 }
 
 func (useCase *TeamUseCase) InviteUser(ctx context.Context, inviterID int64, input InviteUserInput) error {
-	if _, err := useCase.teams.GetByID(ctx, input.TeamID); err != nil {
+	team, err := useCase.teams.GetByID(ctx, input.TeamID)
+	if err != nil {
 		if errors.Is(err, domain.ErrTeamNotFound) {
 			return domain.ErrTeamNotFound
 		}
@@ -159,7 +157,7 @@ func (useCase *TeamUseCase) InviteUser(ctx context.Context, inviterID int64, inp
 		return err
 	}
 
-	if err = useCase.notifier.SendInviteEmail(ctx, input.Email, "dummy team name"); err != nil {
+	if err = useCase.emailSender.SendInviteEmail(ctx, input.Email, team.Name); err != nil {
 		slog.WarnContext(ctx, "failed to send invite email", slog.Any("error", err))
 	}
 
@@ -186,15 +184,4 @@ func teamToResponse(team *domain.Team, members []*domain.TeamMember) *TeamRespon
 	}
 
 	return response
-}
-
-type consoleNotifier struct{}
-
-func (notifier *consoleNotifier) SendInviteEmail(ctx context.Context, email string, teamName string) error {
-	slog.InfoContext(ctx, "invite email sent",
-		slog.String("email", email),
-		slog.String("team_name", teamName),
-	)
-
-	return nil
 }

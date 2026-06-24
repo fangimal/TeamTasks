@@ -11,6 +11,7 @@ import (
 
 	"github.com/fangimal/TeamTask/internal/config"
 	"github.com/fangimal/TeamTask/internal/delivery/router"
+	"github.com/fangimal/TeamTask/internal/external/email"
 	"github.com/fangimal/TeamTask/internal/logger"
 	mysqlrepo "github.com/fangimal/TeamTask/internal/repository/mysql"
 	redisrepo "github.com/fangimal/TeamTask/internal/repository/redis"
@@ -61,7 +62,12 @@ func main() {
 	taskCacheRepository := redisrepo.NewTaskCacheRepository(redisClient)
 
 	authUseCase := usecase.NewAuthUseCase(userRepository, cfg.JWT.Secret, cfg.JWT.Expiration)
-	teamUseCase := usecase.NewTeamUseCase(teamRepository, teamMemberRepository, userRepository)
+
+	httpSender := email.NewHTTPSender(cfg.EmailService.URL, cfg.EmailService.Timeout, appLogger)
+	cbSettings := email.DefaultCircuitBreakerSettings()
+	emailSender := email.NewCircuitBreakerSender(httpSender, appLogger, cbSettings)
+
+	teamUseCase := usecase.NewTeamUseCase(teamRepository, teamMemberRepository, userRepository, emailSender)
 	taskUseCase := usecase.NewTaskUseCase(taskRepository, teamMemberRepository, taskHistoryRepository, taskCacheRepository, database, appLogger)
 	commentUseCase := usecase.NewCommentUseCase(taskCommentRepository, taskRepository, teamMemberRepository)
 	analyticsRepository := mysqlrepo.NewAnalyticsRepository(database)
@@ -69,7 +75,7 @@ func main() {
 
 	httpServer := &http.Server{
 		Addr:         cfg.Server.Address(),
-		Handler:      router.New(appLogger, repository, taskCacheRepository, authUseCase, teamUseCase, taskUseCase, commentUseCase, analyticsUseCase, cfg.JWT.Secret),
+		Handler:      router.New(appLogger, repository, taskCacheRepository, authUseCase, teamUseCase, taskUseCase, commentUseCase, analyticsUseCase, cfg.JWT.Secret, redisClient, cfg.RateLimit),
 		ReadTimeout:  cfg.Server.ReadTimeout,
 		WriteTimeout: cfg.Server.WriteTimeout,
 		IdleTimeout:  cfg.Server.IdleTimeout,

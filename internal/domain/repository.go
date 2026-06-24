@@ -64,3 +64,7 @@ type AnalyticsRepository interface {
 	GetTopUsersPerTeam(ctx context.Context) ([]*TopUser, error)
 	GetIntegrityViolations(ctx context.Context) ([]*IntegrityViolation, error)
 }
+
+type EmailSender interface {
+	SendInviteEmail(ctx context.Context, email string, teamName string) error
+}

@@ -11,11 +11,13 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig
-	Database DatabaseConfig
-	Redis    RedisConfig
-	Logger   LoggerConfig
-	JWT      JWTConfig
+	Server       ServerConfig
+	Database     DatabaseConfig
+	Redis        RedisConfig
+	Logger       LoggerConfig
+	JWT          JWTConfig
+	RateLimit    RateLimitConfig
+	EmailService EmailServiceConfig
 }
 
 type ServerConfig struct {
@@ -53,6 +55,16 @@ type LoggerConfig struct {
 type JWTConfig struct {
 	Secret     string
 	Expiration time.Duration
+}
+
+type RateLimitConfig struct {
+	Enabled           bool
+	RequestsPerMinute int
+}
+
+type EmailServiceConfig struct {
+	URL     string
+	Timeout time.Duration
 }
 
 func Load(path string) (*Config, error) {
@@ -110,6 +122,14 @@ func defaultConfig() *Config {
 		JWT: JWTConfig{
 			Secret:     "change-me-in-env",
 			Expiration: 24 * time.Hour,
+		},
+		RateLimit: RateLimitConfig{
+			Enabled:           true,
+			RequestsPerMinute: 100,
+		},
+		EmailService: EmailServiceConfig{
+			URL:     "https://httpbin.org",
+			Timeout: 5 * time.Second,
 		},
 	}
 }
@@ -185,6 +205,10 @@ func applyEnv(config *Config) error {
 	mapEnv(values, "logger.format", "LOGGER_FORMAT")
 	mapEnv(values, "jwt.secret", "JWT_SECRET")
 	mapEnv(values, "jwt.expiration", "JWT_EXPIRATION")
+	mapEnv(values, "rate_limit.enabled", "RATE_LIMIT_ENABLED")
+	mapEnv(values, "rate_limit.requests_per_minute", "RATE_LIMIT_REQUESTS_PER_MINUTE")
+	mapEnv(values, "email_service.url", "EMAIL_SERVICE_URL")
+	mapEnv(values, "email_service.timeout", "EMAIL_SERVICE_TIMEOUT")
 
 	return applyValues(config, values)
 }
@@ -244,6 +268,14 @@ func applyValues(config *Config, values map[string]string) error {
 			config.JWT.Secret = value
 		case "jwt.expiration":
 			assignDuration(&config.JWT.Expiration, key, value, &errs)
+		case "rate_limit.enabled":
+			config.RateLimit.Enabled = value == "true" || value == "1"
+		case "rate_limit.requests_per_minute":
+			assignInt(&config.RateLimit.RequestsPerMinute, key, value, &errs)
+		case "email_service.url":
+			config.EmailService.URL = value
+		case "email_service.timeout":
+			assignDuration(&config.EmailService.Timeout, key, value, &errs)
 		default:
 			return fmt.Errorf("unknown config key %q", key)
 		}
