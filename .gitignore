@@ -9,3 +9,4 @@ other/
 *.exe
 *.test
 coverage.out
+coverage

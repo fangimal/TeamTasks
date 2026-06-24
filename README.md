@@ -1,6 +1,6 @@
 # TeamTasks
 
-REST API сервис для управления задачами в командах. Текущий этап: мониторинг (Prometheus метрики).
+REST API сервис для управления задачами в командах. Текущий этап: тестирование (Unit + Integration).
 
 ## Ожидаемый функционал
 
@@ -660,3 +660,60 @@ curl -i -X POST http://localhost:8080/api/v1/teams/1/invite \
 **Проверка размыкания CB:**
 
 Измените `EMAIL_SERVICE_URL` в `.env` на нерабочий адрес (например, `http://localhost:9999`), перезапустите приложение и сделайте 5+ запросов на приглашение. После размыкания CB запросы перестанут пытаться соединиться с сервером (мгновенный ответ), пользователь всё равно будет добавлен в БД, а в логах появится `WARN circuit breaker open, email not sent`.
+
+## Тестирование
+
+### Unit-тесты (бизнес-логика)
+
+Тесты расположены в `internal/usecase/*_test.go`. Используют `testify/mock` для изоляции от БД и Redis.
+
+**Запуск:**
+```bash
+make test-unit
+# или
+go test -short -count=1 ./internal/usecase/...
+```
+
+Unit-тесты не требуют Docker и выполняются быстро (< 1 сек).
+
+**Покрытие:**
+- `AuthUseCase`: регистрация (успех, дубликат, невалидные данные), логин (успех, неверный пароль, пользователь не найден).
+- `TaskUseCase`: создание задач (успех, неучастник команды, невалидный assignee), RBAC при обновлении (member не может обновить чужую задачу), получение списка (кэш, фильтрация).
+
+### Интеграционные тесты (БД)
+
+Тесты расположены в `internal/repository/mysql/*_test.go`. Используют `testcontainers-go` для поднятия изолированного MySQL в Docker.
+
+**Запуск:**
+```bash
+make test-integration
+# или
+go test -count=1 -run Integration ./internal/repository/mysql/...
+```
+
+**Требования:**
+- Docker Engine (Docker Desktop для Windows/Mac)
+- Порт 3306 не должен быть занят (контейнер использует случайный порт)
+
+**Покрытие:**
+- `TaskRepository.Create` и `GetByID`: проверка корректного маппинга полей.
+- `TaskRepository.GetList`: динамические фильтры (`status`, `assignee_id`) и пагинация (`LIMIT/OFFSET`).
+- `TaskRepository.Update`: обновление задачи через транзакцию.
+- `TaskHistoryRepository`: запись истории с JSON-полями и чтение.
+
+### Запуск всех тестов
+
+```bash
+make test
+```
+
+### Покрытие кода
+
+```bash
+make test-coverage
+# или
+go test -coverprofile=coverage.out -count=1 ./...
+go tool cover -func=coverage.out
+```
+
+После выполнения будет выведен отчёт с указанием процента покрытия по каждой функции.
