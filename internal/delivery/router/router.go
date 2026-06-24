@@ -7,6 +7,7 @@ import (
 	"github.com/fangimal/TeamTask/internal/config"
 	httpdelivery "github.com/fangimal/TeamTask/internal/delivery/http"
 	"github.com/fangimal/TeamTask/internal/delivery/http/middleware"
+	"github.com/fangimal/TeamTask/internal/monitoring"
 	"github.com/fangimal/TeamTask/internal/usecase"
 	"github.com/redis/go-redis/v9"
 )
@@ -33,6 +34,7 @@ func New(
 	commentHandler := httpdelivery.NewCommentHandler(logger, commentUseCase)
 	analyticsHandler := httpdelivery.NewAnalyticsHandler(logger, analyticsUseCase)
 
+	mux.Handle("GET /metrics", monitoring.Handler())
 	mux.HandleFunc("GET /health", healthHandler.Check)
 	mux.HandleFunc("POST /api/v1/register", authHandler.Register)
 	mux.HandleFunc("POST /api/v1/login", authHandler.Login)
@@ -62,5 +64,5 @@ func New(
 	mux.Handle("GET /api/v1/analytics/top-users", protect(analyticsHandler.GetTopUsers))
 	mux.Handle("GET /api/v1/analytics/integrity-check", protect(analyticsHandler.GetIntegrityCheck))
 
-	return middleware.Logging(logger)(mux)
+	return middleware.Logging(logger)(monitoring.Middleware(mux))
 }

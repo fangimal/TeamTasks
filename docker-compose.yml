@@ -43,6 +43,15 @@ services:
     networks:
       - teamtasks
 
+  prometheus:
+    image: prom/prometheus:v3.3.0
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    networks:
+      - teamtasks
+
 networks:
   teamtasks:
     driver: bridge

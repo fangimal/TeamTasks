@@ -13,6 +13,7 @@ import (
 	"github.com/fangimal/TeamTask/internal/delivery/router"
 	"github.com/fangimal/TeamTask/internal/external/email"
 	"github.com/fangimal/TeamTask/internal/logger"
+	"github.com/fangimal/TeamTask/internal/monitoring"
 	mysqlrepo "github.com/fangimal/TeamTask/internal/repository/mysql"
 	redisrepo "github.com/fangimal/TeamTask/internal/repository/redis"
 	"github.com/fangimal/TeamTask/internal/usecase"
@@ -43,6 +44,8 @@ func main() {
 		appLogger.Error("failed to apply database migrations", slog.Any("error", err))
 		os.Exit(1)
 	}
+
+	monitoring.RegisterDBMetrics(database)
 
 	repository := mysqlrepo.NewRepository(database)
 	userRepository := mysqlrepo.NewUserRepository(database)
