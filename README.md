@@ -4,6 +4,8 @@ REST API сервис для управления задачами в коман
 
 **Стек:** Go 1.26.4, MySQL 9.7, Redis 8.8, Prometheus 3.3, Docker Compose.
 
+Полное техническое задание: [doc/TZ.md](doc/TZ.md).
+
 ---
 
 ## Архитектура
@@ -245,7 +247,7 @@ rate(teamtasks_http_requests_total[1m])
 
 ## Проверка соответствия ТЗ (end-to-end)
 
-### 1. Регистрация и аутентификация
+### 1. Регистрация и аутентификация (ТЗ п.1)
 
 ```bash
 # Регистрация
@@ -285,7 +287,7 @@ curl -i http://localhost:8080/api/v1/ping
 # 401 Unauthorized — без токена
 ```
 
-### 2. Управление командами
+### 2. Управление командами (ТЗ п.2)
 
 ```bash
 # Создание команды (создатель становится owner)
@@ -310,7 +312,7 @@ curl -i -X POST http://localhost:8080/api/v1/teams/1/invite \
 # 403 Forbidden
 ```
 
-### 3. Управление задачами
+### 3. Управление задачами (ТЗ п.3)
 
 ```bash
 # Создание задачи (только член команды)
@@ -372,11 +374,13 @@ curl -i "http://localhost:8080/api/v1/tasks/1/comments?limit=5&offset=0" \
 # Ожидаемый ответ: {"data":[...],"total":1,"limit":5,"offset":0}
 ```
 
-### 4. Сложные SQL-запросы
+### 4. Сложные SQL-запросы (ТЗ п.4)
 
-#### а) JOIN 3+ таблиц + агрегация — статистика команд
+#### а) Запрос с JOIN 3+ таблиц + агрегация
 
-Запрос объединяет `teams`, `team_members`, `tasks`; вычисляет количество участников и выполненных задач за 7 дней.
+`-- "Получить для каждой команды: название, количество участников, количество задач в статусе done за последние 7 дней"`
+
+Запрос объединяет `teams`, `team_members`, `tasks` с агрегацией.
 
 ```bash
 curl -i http://localhost:8080/api/v1/analytics/team-stats \
@@ -395,7 +399,9 @@ curl -i http://localhost:8080/api/v1/analytics/team-stats \
 ]
 ```
 
-#### б) Оконная функция DENSE_RANK — топ-3 пользователей
+#### б) Подзапрос с оконной функцией DENSE_RANK
+
+`-- "Получить топ-3 пользователя по количеству созданных задач в каждой команде"`
 
 Использует CTE + `DENSE_RANK() OVER (PARTITION BY team_id ORDER BY task_count DESC)`.
 
@@ -417,7 +423,9 @@ curl -i http://localhost:8080/api/v1/analytics/top-users \
 ]
 ```
 
-#### в) Проверка целостности данных
+#### в) Запрос с условием по связанным таблицам
+
+`-- "Найти задачи, где assignee не является членом команды этой задачи" (валидация целостности)`
 
 Находит задачи, где `assignee_id` не состоит в `team_members` команды задачи.
 
@@ -431,7 +439,7 @@ curl -i http://localhost:8080/api/v1/analytics/integrity-check \
 []
 ```
 
-### 5. Кэширование Redis
+### 5. Кэширование Redis (ТЗ п.5)
 
 Список задач команды кэшируется в Redis с TTL 5 минут. Ключ строится из параметров фильтра (`team_id`, `status`, `assignee_id`) и пагинации.
 
@@ -455,7 +463,7 @@ curl -i -X PUT http://localhost:8080/api/v1/tasks/1 \
 docker-compose exec redis redis-cli keys 'tasks:team:*'
 ```
 
-### 6. Rate Limiting
+### 6. Rate Limiting (ТЗ п.7)
 
 На защищённые эндпоинты наложен лимит 100 запросов/мин на пользователя (Redis INCR/EXPIRE).
 
@@ -479,7 +487,7 @@ Retry-After: 60
 
 При недоступности Redis запросы пропускаются (fail open).
 
-### 7. Circuit Breaker
+### 7. Circuit Breaker (ТЗ п.7 — Email Service)
 
 Приглашение пользователя обёрнуто в Circuit Breaker (gobreaker). Параметры: MaxRequests=2, Interval=10s, Timeout=30s, порог размыкания ≥3 запроса, ≥60% ошибок.
 
@@ -497,7 +505,7 @@ curl -i -X POST http://localhost:8080/api/v1/teams/1/invite \
 # а в логах появится WARN "circuit breaker open, email not sent"
 ```
 
-### 8. Prometheus метрики
+### 8. Prometheus метрики (ТЗ п.7)
 
 ```bash
 curl http://localhost:8080/metrics | grep teamtasks
