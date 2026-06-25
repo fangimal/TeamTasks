@@ -7,6 +7,12 @@
 bin
 dist
 tmp
+other
 *.exe
 *.test
 coverage.out
+coverage
+*.md
+docs/
+.gitignore
+README.md

@@ -86,10 +86,10 @@ type TaskComment struct {
 }
 
 type TeamStats struct {
-	TeamID             int64 `json:"team_id"`
+	TeamID             int64  `json:"team_id"`
 	TeamName           string `json:"team_name"`
-	MemberCount        int64 `json:"member_count"`
-	DoneTasksLast7Days int64 `json:"done_tasks_last_7_days"`
+	MemberCount        int64  `json:"member_count"`
+	DoneTasksLast7Days int64  `json:"done_tasks_last_7_days"`
 }
 
 type TopUser struct {

@@ -16,13 +16,13 @@ type AnalyticsUseCase interface {
 }
 
 type AnalyticsHandler struct {
-	logger   *slog.Logger
+	logger    *slog.Logger
 	analytics AnalyticsUseCase
 }
 
 func NewAnalyticsHandler(logger *slog.Logger, analytics AnalyticsUseCase) *AnalyticsHandler {
 	return &AnalyticsHandler{
-		logger:   logger,
+		logger:    logger,
 		analytics: analytics,
 	}
 }

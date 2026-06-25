@@ -9,7 +9,7 @@ LOCAL_RUN = DATABASE_HOST=$(LOCAL_DATABASE_HOST) go run ./cmd/app
 LOCAL_DEBUG = command -v dlv >/dev/null 2>&1 || { echo "Delve is not installed. Run: go install github.com/go-delve/delve/cmd/dlv@latest"; exit 1; }; DATABASE_HOST=$(LOCAL_DATABASE_HOST) dlv debug ./cmd/app --headless --listen=:40000 --api-version=2 --accept-multiclient
 endif
 
-.PHONY: build up down logs infra-up local-start local-stop run-local local-debug migrate-up migrate-down test test-unit test-integration test-coverage
+.PHONY: build up down logs infra-up local-start local-stop run-local local-debug migrate-up migrate-down test test-unit test-integration test-coverage lint clean fmt
 
 build:
 	$(DOCKER_COMPOSE) build
@@ -58,3 +58,12 @@ test:
 test-coverage:
 	go test -short -coverprofile coverage.out -count=1 ./...
 	go tool cover -func coverage.out
+
+lint:
+	golangci-lint run ./...
+
+fmt:
+	gofmt -s -w .
+
+clean:
+	$(DOCKER_COMPOSE) down -v --rmi local

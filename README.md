@@ -1,479 +1,382 @@
 # TeamTasks
 
-REST API сервис для управления задачами в командах. Текущий этап: тестирование (Unit + Integration).
+REST API сервис для управления задачами в командах с ролевой моделью, аудитом изменений, кэшированием и мониторингом.
 
-## Ожидаемый функционал
+**Стек:** Go 1.26.4, MySQL 9.7, Redis 8.8, Prometheus 3.3, Docker Compose.
 
-REST API для совместной работы над задачами внутри команд.
+---
 
-Планируемые возможности приложения:
+## Архитектура
 
-- [x] регистрация и вход пользователей;
-- [x] JWT-аутентификация и middleware авторизации;
-- [x] создание команд;
-- [x] ролевая модель `owner`, `admin`, `member`;
-- [x] приглашение участников;
-- [x] проверка прав доступа к задачам и командам;
-- [x] healthcheck через `/health`;
-- [ ] управление участниками команды (удаление, смена роли);
-- [x] создание, просмотр, обновление задач;
-- [x] назначение ответственного за задачу;
-- [x] статусы задач: `todo`, `in_progress`, `done`;
-- [x] фильтрация и пагинация списка задач;
-- [x] история изменений задач (аудит);
-- [x] комментарии к задачам;
-- [x] кэширование списков задач через Redis;
-- [x] сложные SQL-запросы для аналитики и выборок по командам;
-- [x] rate limiting (100 запр/мин на пользователя, Redis + INCR/EXPIRE);
-- [x] circuit breaker для внешнего email-сервиса (gobreaker);
-- [x] Prometheus-метрики через `/metrics`.
+Проект следует **Clean Architecture** с разделением на слои:
 
-Текущее состояние проекта: реализована инфраструктура приложения, подключение к MySQL и Redis, миграции схемы БД, базовый слой Repository, проверка подключения к базе данных и Redis в `/health`, регистрация, логин, JWT middleware, создание команд, получение списка команд, приглашение участников с проверкой ролей, полный CRUD для задач с фильтрацией, пагинацией и проверкой прав доступа (RBAC), аудит изменений задач с транзакционной записью в `task_history`, комментарии к задачам с проверкой членства в команде, кэширование списков задач в Redis (TTL 5 минут) с автоматической инвалидацией при создании или обновлении задачи, аналитические эндпоинты со сложными SQL-запросами (статистика команд, топ пользователей с оконными функциями, проверка целостности данных) и оптимизированные индексы, rate limiting (100 запр/мин на пользователя через Redis), circuit breaker для внешнего email-сервиса (gobreaker) с graceful degradation, Prometheus-метрики HTTP запросов и пула соединений БД через `/metrics`.
+- `domain` — сущности, интерфейсы репозиториев, ошибки
+- `usecase` — бизнес-логика (зависит только от интерфейсов domain)
+- `repository/mysql` — реализация репозиториев для MySQL
+- `repository/redis` — реализация кэша в Redis
+- `delivery/http` — HTTP-обработчики
+- `delivery/middleware` — Auth, Rate Limit, Logging
+- `delivery/router` — настройка маршрутов (`net/http`)
+- `config` — загрузка конфигурации (YAML + ENV)
+- `pkg/jwt`, `pkg/password`, `pkg/response` — утилиты
 
-## Требования
+```
+cmd/
+  app/main.go          # Точка входа
+  migrate/main.go      # CLI для миграций
+internal/
+  config/              # Конфигурация
+  domain/              # Модели, интерфейсы, ошибки
+  usecase/             # Бизнес-логика
+  delivery/
+    http/              # Хендлеры
+    middleware/        # Auth, Rate Limit, Logging
+    router/            # Маршруты
+  repository/
+    mysql/             # Репозитории MySQL
+    redis/             # Репозиторий Redis (кэш)
+  external/email/      # Circuit Breaker для email
+  monitoring/          # Prometheus метрики
+  logger/              # structured slog
+pkg/                   # JWT, password, response
+migrations/            # SQL-миграции
+configs/config.yaml    # Базовая конфигурация
+prometheus/            # Конфиг Prometheus
+```
 
-- Go 1.26.4
-- Docker
-- Docker Compose
-- Make
+---
 
-## Первый запуск
-
-Создайте или проверьте файл `.env` в корне проекта. Базовые значения уже подготовлены для локальной разработки.
-
-Запуск всех сервисов:
+## Быстрый старт
 
 ```bash
+# 1. Клонировать репозиторий
+git clone https://github.com/fangimal/TeamTasks.git
+cd TeamTasks
+
+# 2. Скопировать .env.example в .env
+cp .env.example .env
+
+# 3. Запустить проект
 make up
 ```
 
-Команда собирает Go-приложение и поднимает четыре контейнера:
+Все сервисы поднимаются одной командой:
 
-- `app` на порту `8080`
-- `mysql` на порту `3306`
-- `redis` на порту `6379`
-- `prometheus` на порту `9090`
+| Сервис | Порт | Описание |
+|--------|------|----------|
+| `app` | 8080 | HTTP API |
+| `mysql` | 3306 | База данных |
+| `redis` | 6379 | Кэш + rate limiter |
+| `prometheus` | 9090 | Сбор метрик |
 
-При старте приложение подключается к MySQL, применяет миграции из `migrations/` и завершает запуск с ошибкой, если база данных недоступна.
-
-## Миграции
-
-Применить миграции вручную:
-
-```bash
-make migrate-up
-```
-
-Откатить миграции:
-
-```bash
-make migrate-down
-```
-
-Для локального запуска приложения с MySQL и Redis в Docker:
-
-```bash
-make local-start
-```
-
-Остановить локальную инфраструктуру:
-
-```bash
-make local-stop
-```
-
-Запуск под Delve для подключения отладчика:
-
-```bash
-make local-debug
-```
-
-По умолчанию Delve слушает `:40000` в headless-режиме. Если `dlv` не установлен, выполните:
-
-```bash
-go install github.com/go-delve/delve/cmd/dlv@latest
-```
-
-## Проверка работоспособности
-
-Healthcheck:
+После запуска проверить работоспособность:
 
 ```bash
 curl http://localhost:8080/health
 ```
 
-Ожидаемый ответ:
+Ожидаемый ответ: `{"status":"ok","database":"connected","cache":"connected","timestamp":"..."}`
 
-```json
-{
-  "status": "ok",
-  "database": "connected",
-  "cache": "connected",
-  "timestamp": "2026-06-21T00:00:00Z"
-}
-```
+---
 
-Если MySQL недоступен, эндпоинт возвращает `503 Service Unavailable` и `"database": "disconnected"`.
+## Переменные окружения
 
-Регистрация пользователя:
+| Переменная | По умолчанию | Описание |
+|------------|-------------|----------|
+| `SERVER_HOST` | `0.0.0.0` | Хост HTTP-сервера |
+| `SERVER_PORT` | `8080` | Порт HTTP-сервера |
+| `SERVER_READ_TIMEOUT` | `10s` | Таймаут чтения запроса |
+| `SERVER_WRITE_TIMEOUT` | `10s` | Таймаут записи ответа |
+| `SERVER_IDLE_TIMEOUT` | `60s` | Таймаут бездействия соединения |
+| `SERVER_SHUTDOWN_TIMEOUT` | `5s` | Таймаут graceful shutdown |
+| `DATABASE_HOST` | `mysql` | Хост MySQL |
+| `DATABASE_PORT` | `3306` | Порт MySQL |
+| `DATABASE_USER` | `teamtasks` | Пользователь MySQL |
+| `DATABASE_PASSWORD` | `teamtasks` | Пароль MySQL |
+| `DATABASE_NAME` | `teamtasks` | Название БД |
+| `DATABASE_ROOT_PASSWORD` | `root` | Root-пароль MySQL |
+| `DATABASE_MAX_OPEN_CONNS` | `25` | Макс. открытых соединений |
+| `DATABASE_MAX_IDLE_CONNS` | `5` | Макс. бездействующих соединений |
+| `DATABASE_CONN_MAX_LIFETIME` | `5m` | Время жизни соединения |
+| `REDIS_HOST` | `redis` | Хост Redis |
+| `REDIS_PORT` | `6379` | Порт Redis |
+| `REDIS_PASSWORD` | `` | Пароль Redis |
+| `REDIS_DB` | `0` | Номер БД Redis |
+| `LOGGER_LEVEL` | `info` | Уровень лога (debug/info/warn/error) |
+| `LOGGER_FORMAT` | `json` | Формат лога (json/text) |
+| `JWT_SECRET` | `change-me-in-production` | Секрет для подписи JWT |
+| `JWT_EXPIRATION` | `24h` | Время жизни JWT-токена |
+| `RATE_LIMIT_ENABLED` | `true` | Включить rate limiter |
+| `RATE_LIMIT_REQUESTS_PER_MINUTE` | `100` | Лимит запросов в минуту |
+| `EMAIL_SERVICE_URL` | `https://httpbin.org/post` | URL email-сервиса |
+| `EMAIL_SERVICE_TIMEOUT` | `5s` | Таймаут запроса к email |
+
+---
+
+## API Endpoints
+
+### Публичные (без JWT)
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| `GET` | `/health` | Проверка работоспособности |
+| `GET` | `/metrics` | Prometheus метрики |
+| `POST` | `/api/v1/register` | Регистрация пользователя |
+| `POST` | `/api/v1/login` | Вход в систему |
+
+### Защищённые (требуют JWT + rate limit)
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| `GET` | `/api/v1/ping` | Проверка авторизации |
+| `POST` | `/api/v1/teams` | Создание команды |
+| `GET` | `/api/v1/teams` | Список команд пользователя |
+| `POST` | `/api/v1/teams/{id}/invite` | Приглашение в команду |
+| `POST` | `/api/v1/tasks` | Создание задачи |
+| `GET` | `/api/v1/tasks` | Список задач (фильтрация + пагинация) |
+| `GET` | `/api/v1/tasks/{id}` | Получение задачи |
+| `PUT` | `/api/v1/tasks/{id}` | Обновление задачи |
+| `GET` | `/api/v1/tasks/{id}/history` | История изменений задачи |
+| `POST` | `/api/v1/tasks/{id}/comments` | Добавить комментарий |
+| `GET` | `/api/v1/tasks/{id}/comments` | Список комментариев |
+| `GET` | `/api/v1/analytics/team-stats` | Статистика команд |
+| `GET` | `/api/v1/analytics/top-users` | Топ пользователей |
+| `GET` | `/api/v1/analytics/integrity-check` | Проверка целостности |
+
+### Параметры запроса списка задач
+
+`GET /api/v1/tasks` поддерживает:
+
+- `team_id` (обязательный) — ID команды
+- `status` — фильтр по статусу (`todo`, `in_progress`, `done`)
+- `assignee_id` — фильтр по исполнителю
+- `limit` — количество записей (по умолчанию 10)
+- `offset` — смещение (по умолчанию 0)
+
+---
+
+## Разработка и тестирование
 
 ```bash
+# Unit-тесты (без Docker)
+make test-unit
+
+# Интеграционные тесты (требуют Docker)
+make test-integration
+
+# Все тесты
+make test
+
+# Покрытие кода
+make test-coverage
+
+# Линтинг (требует golangci-lint)
+make lint
+
+# Форматирование кода
+make fmt
+```
+
+### Локальный запуск без Docker
+
+```bash
+# Поднять только MySQL и Redis
+make infra-up
+
+# Запустить приложение локально
+make run-local   # или make local-start
+```
+
+---
+
+## Мониторинг (Prometheus)
+
+Эндпоинт `/metrics` доступен на порту приложения.
+
+### Доступные метрики
+
+- `teamtasks_http_requests_total` — количество запросов (labels: `method`, `path`, `status`)
+- `teamtasks_http_request_duration_seconds` — гистограмма длительности
+- `teamtasks_db_max_open_connections`
+- `teamtasks_db_open_connections`
+- `teamtasks_db_in_use_connections`
+- `teamtasks_db_idle_connections`
+- `teamtasks_db_wait_count_total`
+- `teamtasks_db_wait_duration_seconds_total`
+
+### Prometheus UI
+
+После `make up` откройте http://localhost:9090.
+
+Пример PromQL запроса:
+
+```promql
+rate(teamtasks_http_requests_total[1m])
+```
+
+---
+
+## Команды Makefile
+
+| Цель | Описание |
+|------|----------|
+| `build` | Сборка Docker-образов |
+| `up` | Запуск всех сервисов |
+| `down` | Остановка всех сервисов |
+| `logs` | Логи приложения |
+| `infra-up` | Запуск MySQL + Redis |
+| `local-start` | Инфраструктура + локальный запуск |
+| `local-stop` | Остановка инфраструктуры |
+| `run-local` | Локальный запуск приложения |
+| `local-debug` | Запуск под Delve |
+| `migrate-up` | Применить миграции |
+| `migrate-down` | Откатить миграции |
+| `test` | Все тесты |
+| `test-unit` | Unit-тесты |
+| `test-integration` | Интеграционные тесты |
+| `test-coverage` | Покрытие кода |
+| `lint` | Линтинг |
+| `fmt` | Форматирование |
+| `clean` | Остановка + удаление томов |
+
+---
+
+---
+
+## Проверка соответствия ТЗ (end-to-end)
+
+### 1. Регистрация и аутентификация
+
+```bash
+# Регистрация
 curl -i -X POST http://localhost:8080/api/v1/register \
   -H "Content-Type: application/json" \
   -d '{"email":"test@test.com","password":"secret"}'
-```
 
-```pwsh
-curl.exe -X POST http://localhost:8080/api/v1/register `
-  -H "Content-Type: application/json" `
+# Повторная регистрация — 409 Conflict
+curl -i -X POST http://localhost:8080/api/v1/register \
+  -H "Content-Type: application/json" \
   -d '{"email":"test@test.com","password":"secret"}'
-```
 
-Повторная регистрация с тем же email возвращает `409 Conflict`.
-
-Логин:
-
-```bash
+# Логин (получение JWT)
 curl -i -X POST http://localhost:8080/api/v1/login \
   -H "Content-Type: application/json" \
   -d '{"email":"test@test.com","password":"secret"}'
 ```
 
-Ожидаемый ответ содержит JWT:
+Ожидаемый ответ логина: `200 OK` с `{"token":"...","user":{"id":1,"email":"test@test.com"}}`.
 
-```json
-{
-  "token": "...",
-  "user": {
-    "id": 1,
-    "email": "test@test.com"
-  }
-}
-```
-
-Проверка защищенного маршрута:
+Фиксация токена в переменную (PowerShell):
 
 ```bash
-TOKEN="<token-from-login>"
-curl -i http://localhost:8080/api/v1/ping \
-  -H "Authorization: Bearer $TOKEN"
+$TOKEN = (curl -s -X POST http://localhost:8080/api/v1/login `
+  -H "Content-Type: application/json" `
+  -d '{"email":"test@test.com","password":"secret"}' | `
+  ConvertFrom-Json | Select -ExpandProperty token)
 ```
 
-Без заголовка `Authorization` или с невалидным токеном маршрут возвращает `401 Unauthorized`.
-
-### Команды
-
-Создание команды (после логина):
+Проверка валидности JWT:
 
 ```bash
-TOKEN="<token-from-login>"
+curl -i http://localhost:8080/api/v1/ping -H "Authorization: Bearer $TOKEN"
+# 200 OK
+
+curl -i http://localhost:8080/api/v1/ping
+# 401 Unauthorized — без токена
+```
+
+### 2. Управление командами
+
+```bash
+# Создание команды (создатель становится owner)
 curl -i -X POST http://localhost:8080/api/v1/teams \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"name":"Backend Team"}'
-```
 
-Ожидаемый ответ: `201 Created` с данными команды.
-
-Получение списка команд пользователя:
-
-```bash
-curl -i http://localhost:8080/api/v1/teams \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-С пагинацией:
-
-```bash
+# Список команд пользователя (с пагинацией)
 curl -i "http://localhost:8080/api/v1/teams?limit=10&offset=0" \
   -H "Authorization: Bearer $TOKEN"
-```
 
-Приглашение пользователя в команду (только `owner` или `admin`):
-
-```bash
+# Приглашение пользователя в команду (только owner/admin)
 curl -i -X POST http://localhost:8080/api/v1/teams/1/invite \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"email":"user2@test.com","role":"member"}'
+# 200 OK
+
+# Проверка RBAC — member не может приглашать
+# (залогиниться как user2, попробовать пригласить)
+# 403 Forbidden
 ```
 
-Ожидаемый ответ: `200 OK`.
-
-Проверка прав доступа — пользователь с ролью `member` пытается пригласить:
+### 3. Управление задачами
 
 ```bash
-TOKEN_MEMBER="<token-of-member-user>"
-curl -i -X POST http://localhost:8080/api/v1/teams/1/invite \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN_MEMBER" \
-  -d '{"email":"user3@test.com"}'
-```
-
-Ожидаемый ответ: `403 Forbidden` с сообщением "insufficient permissions".
-
-Ошибки валидации:
-
-```bash
-# Приглашение несуществующего email
-curl -i -X POST http://localhost:8080/api/v1/teams/1/invite \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"email":"nobody@test.com"}'
-# 404 Not Found
-
-# Приглашение пользователя, уже состоящего в команде
-curl -i -X POST http://localhost:8080/api/v1/teams/1/invite \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"email":"user2@test.com"}'
-# 409 Conflict
-```
-
-### Задачи
-
-Создание задачи (автор должен быть участником команды):
-
-```bash
-TOKEN="<token-from-login>"
+# Создание задачи (только член команды)
 curl -i -X POST http://localhost:8080/api/v1/tasks \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{"title":"Implement auth","description":"Add JWT auth","assignee_id":1,"team_id":1}'
-```
+  -d '{"title":"Implement auth","description":"Add JWT","assignee_id":1,"team_id":1}'
+# 201 Created
 
-Ожидаемый ответ: `201 Created` с данными задачи. Поля `status` и `description` опциональны (по умолчанию `todo` и пустая строка).
-
-Попытка создать задачу в команде, где пользователь не состоит:
-
-```bash
+# Попытка создать задачу в чужой команде — 403
 curl -i -X POST http://localhost:8080/api/v1/tasks \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"title":"Hack","assignee_id":1,"team_id":999}'
-```
 
-Ожидаемый ответ: `403 Forbidden` с сообщением "you are not a member of this team".
-
-Попытка назначить исполнителя, не состоящего в команде:
-
-```bash
+# Назначение исполнителя не из команды — 400
 curl -i -X POST http://localhost:8080/api/v1/tasks \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{"title":"Bad assignee","assignee_id":999,"team_id":1}'
-```
+  -d '{"title":"Bad","assignee_id":999,"team_id":1}'
 
-Ожидаемый ответ: `400 Bad Request` с сообщением "assignee is not a member of this team".
-
-Получение списка задач команды с фильтрацией и пагинацией:
-
-```bash
+# Получение списка задач с фильтрацией и пагинацией
 curl -i "http://localhost:8080/api/v1/tasks?team_id=1&status=todo&limit=5&offset=0" \
   -H "Authorization: Bearer $TOKEN"
-```
 
-Ожидаемый ответ: `200 OK` с JSON вида:
-```json
-{
-  "data": [ { "id": 1, "title": "Implement auth", ... } ],
-  "total": 1,
-  "limit": 5,
-  "offset": 0
-}
-```
-
-Фильтр по исполнителю:
-
-```bash
-curl -i "http://localhost:8080/api/v1/tasks?team_id=1&assignee_id=1" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-Получение задачи по ID:
-
-```bash
+# Получение задачи по ID
 curl -i http://localhost:8080/api/v1/tasks/1 \
   -H "Authorization: Bearer $TOKEN"
-```
 
-Пользователь не из команды пытается получить задачу — `403 Forbidden`.
-
-Обновление задачи:
-
-```bash
+# Обновление задачи (с записью в историю)
 curl -i -X PUT http://localhost:8080/api/v1/tasks/1 \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"title":"Updated title","status":"in_progress"}'
-```
+# 200 OK + автоматическая запись в task_history
 
-Ожидаемый ответ: `200 OK` с обновлёнными данными задачи.
-
-Проверка RBAC — участник с ролью `member` пытается обновить чужую задачу (не является assignee и не автор):
-
-```bash
-TOKEN_MEMBER="<token-of-member-user-not-owner-of-task>"
+# Проверка RBAC — member не может обновить чужую задачу
 curl -i -X PUT http://localhost:8080/api/v1/tasks/1 \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN_MEMBER" \
   -d '{"title":"Hacked"}'
-```
+# 403 Forbidden
 
-Ожидаемый ответ: `403 Forbidden` с сообщением "insufficient permissions".
-
-### История изменений задач
-
-При каждом обновлении задачи (`PUT /api/v1/tasks/{id}`) автоматически создаётся запись в таблице `task_history`. Обновление задачи и запись истории выполняются в одной транзакции: если запись в историю не удалась, обновление задачи откатывается.
-
-Если отправлен `PUT` с данными, идентичными текущим, запись в историю **не создаётся**.
-
-Получение истории задачи (участник команды):
-
-```bash
+# История изменений задачи
 curl -i "http://localhost:8080/api/v1/tasks/1/history?limit=10&offset=0" \
   -H "Authorization: Bearer $TOKEN"
-```
+# Ожидаемый ответ: массив записей с old_value/new_value (JSON)
 
-Ожидаемый ответ `200 OK`:
-
-```json
-{
-  "data": [
-    {
-      "id": 1,
-      "task_id": 1,
-      "changed_by": 1,
-      "changed_at": "2026-06-22T19:55:12Z",
-      "old_value": {"status": "todo"},
-      "new_value": {"status": "in_progress"}
-    }
-  ],
-  "limit": 10,
-  "offset": 0
-}
-```
-
-Пользователь, не состоящий в команде задачи, получает `403 Forbidden`.
-
-### Комментарии к задачам
-
-Создание комментария (участник команды):
-
-```bash
+# Комментарии к задаче
 curl -i -X POST http://localhost:8080/api/v1/tasks/1/comments \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"text":"Great job!"}'
-```
+# 201 Created
 
-Ожидаемый ответ: `201 Created` с данными комментария.
-
-Пользователь, не состоящий в команде задачи, получает `403 Forbidden`:
-
-```bash
-TOKEN_OTHER="<token-of-user-not-in-team>"
-curl -i -X POST http://localhost:8080/api/v1/tasks/1/comments \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN_OTHER" \
-  -d '{"text":"Hack"}'
-```
-
-Получение комментариев с пагинацией:
-
-```bash
+# Получение комментариев с пагинацией
 curl -i "http://localhost:8080/api/v1/tasks/1/comments?limit=5&offset=0" \
   -H "Authorization: Bearer $TOKEN"
+# Ожидаемый ответ: {"data":[...],"total":1,"limit":5,"offset":0}
 ```
 
-Ожидаемый ответ `200 OK`:
-```json
-{
-  "data": [
-    {
-      "id": 1,
-      "task_id": 1,
-      "user_id": 1,
-      "text": "Great job!",
-      "created_at": "2026-06-23T12:00:00Z",
-      "updated_at": "2026-06-23T12:00:00Z"
-    }
-  ],
-  "total": 1,
-  "limit": 5,
-  "offset": 0
-}
-```
+### 4. Сложные SQL-запросы
 
-Комментарий к несуществующей задаче возвращает `404 Not Found`:
+#### а) JOIN 3+ таблиц + агрегация — статистика команд
 
-```bash
-curl -i -X POST http://localhost:8080/api/v1/tasks/9999/comments \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"text":"test"}'
-```
-
-Пустой текст комментария возвращает `400 Bad Request`:
-
-```bash
-curl -i -X POST http://localhost:8080/api/v1/tasks/1/comments \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"text":""}'
-```
-
-### Кэширование списков задач
-
-Список задач команды (`GET /api/v1/tasks?team_id=1`) кэшируется в Redis с TTL 5 минут.
-
-Ключ кэша строится на основе параметров фильтра (`team_id`, `status`, `assignee_id`) и пагинации (`limit`, `offset`). Первый запрос после сохранения данных выполняется из Redis (1-2 мс), последующие — из MySQL (10-50 мс).
-
-**Инвалидация кэша:**
-- При создании задачи (`POST /api/v1/tasks`) — кэш команды очищается.
-- При обновлении задачи (`PUT /api/v1/tasks/{id}`) — кэш команды очищается.
-
-Проверка кэширования:
-
-```bash
-# Первый запрос (Cache Miss — данные из MySQL)
-time curl -s "http://localhost:8080/api/v1/tasks?team_id=1" \
-  -H "Authorization: Bearer $TOKEN"
-
-# Второй запрос (Cache Hit — данные из Redis)
-time curl -s "http://localhost:8080/api/v1/tasks?team_id=1" \
-  -H "Authorization: Bearer $TOKEN"
-
-# Проверка инвалидации — обновляем задачу
-curl -i -X PUT http://localhost:8080/api/v1/tasks/1 \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"title":"Updated after cache"}'
-
-# Следующий запрос снова будет Cache Miss
-```
-
-Проверка ключей в Redis (через `redis-cli`):
-
-```bash
-docker-compose exec redis redis-cli keys 'tasks:team:*'
-```
-
-Логи приложения:
-
-```bash
-make logs
-```
-
-Остановка контейнеров:
-
-```bash
-make down
-```
-
-### Аналитика и сложные SQL-запросы
-
-Статистика по командам (количество участников, выполненных задач за 7 дней):
+Запрос объединяет `teams`, `team_members`, `tasks`; вычисляет количество участников и выполненных задач за 7 дней.
 
 ```bash
 curl -i http://localhost:8080/api/v1/analytics/team-stats \
@@ -492,7 +395,9 @@ curl -i http://localhost:8080/api/v1/analytics/team-stats \
 ]
 ```
 
-Топ-3 пользователей по количеству созданных задач в каждой команде (с оконной функцией `DENSE_RANK`):
+#### б) Оконная функция DENSE_RANK — топ-3 пользователей
+
+Использует CTE + `DENSE_RANK() OVER (PARTITION BY team_id ORDER BY task_count DESC)`.
 
 ```bash
 curl -i http://localhost:8080/api/v1/analytics/top-users \
@@ -512,110 +417,50 @@ curl -i http://localhost:8080/api/v1/analytics/top-users \
 ]
 ```
 
-Проверка целостности данных — задачи, у которых `assignee_id` не состоит в `team_members` команды:
+#### в) Проверка целостности данных
+
+Находит задачи, где `assignee_id` не состоит в `team_members` команды задачи.
 
 ```bash
 curl -i http://localhost:8080/api/v1/analytics/integrity-check \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-Ожидаемый ответ `200 OK` (пустой массив при отсутствии нарушений):
+Ожидаемый ответ `200 OK` (пустой массив = нарушений нет):
 ```json
 []
 ```
 
-## Мониторинг (Prometheus)
+### 5. Кэширование Redis
 
-Приложение собирает метрики HTTP-запросов и пула соединений БД через эндпоинт `/metrics`.
-
-### Доступные метрики
-
-- `teamtasks_http_requests_total` — общее количество запросов (labels: `method`, `path`, `status`)
-- `teamtasks_http_request_duration_seconds` — гистограмма длительности запросов (labels: `method`, `path`, `status`)
-- `teamtasks_db_max_open_connections` — макс. число открытых соединений
-- `teamtasks_db_open_connections` — текущее число открытых соединений
-- `teamtasks_db_in_use_connections` — число используемых соединений
-- `teamtasks_db_idle_connections` — число бездействующих соединений
-- `teamtasks_db_wait_count_total` — число ожиданий соединения
-- `teamtasks_db_wait_duration_seconds_total` — суммарное время ожидания
-
-### Prometheus UI
-
-После запуска `make up` откройте http://localhost:9090.
-
-**Проверка целей:**
-1. Перейдите в `Status` -> `Target health`.
-2. Цель `task-manager-api` должна быть в статусе **UP**.
-
-**Примеры PromQL запросов:**
-
-```promql
-# Частота запросов за последнюю минуту
-rate(teamtasks_http_requests_total[1m])
-
-# 95-й перцентиль длительности запросов
-histogram_quantile(0.95, rate(teamtasks_http_request_duration_seconds_bucket[5m]))
-
-# Количество используемых соединений с БД
-teamtasks_db_in_use_connections
-```
-
-### Проверка метрик через curl
+Список задач команды кэшируется в Redis с TTL 5 минут. Ключ строится из параметров фильтра (`team_id`, `status`, `assignee_id`) и пагинации.
 
 ```bash
-curl http://localhost:8080/metrics
+# Первый запрос — Cache Miss (данные из MySQL)
+time curl -s "http://localhost:8080/api/v1/tasks?team_id=1" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Второй запрос — Cache Hit (данные из Redis, быстрее)
+time curl -s "http://localhost:8080/api/v1/tasks?team_id=1" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Инвалидация кэша при обновлении задачи
+curl -i -X PUT http://localhost:8080/api/v1/tasks/1 \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"title":"After cache"}'
+# Следующий GET запрос снова Cache Miss
+
+# Проверка ключей в Redis
+docker-compose exec redis redis-cli keys 'tasks:team:*'
 ```
 
-В выводе должны присутствовать все перечисленные выше метрики.
+### 6. Rate Limiting
 
-## Конфигурация
-
-Базовая конфигурация хранится в `configs/config.yaml`. Значения из переменных окружения имеют приоритет над YAML.
-
-Основные переменные окружения:
-
-- `SERVER_HOST`
-- `SERVER_PORT`
-- `SERVER_READ_TIMEOUT`
-- `SERVER_WRITE_TIMEOUT`
-- `SERVER_IDLE_TIMEOUT`
-- `SERVER_SHUTDOWN_TIMEOUT`
-- `DATABASE_HOST`
-- `DATABASE_PORT`
-- `DATABASE_USER`
-- `DATABASE_PASSWORD`
-- `DATABASE_NAME`
-- `DATABASE_ROOT_PASSWORD`
-- `DATABASE_MAX_OPEN_CONNS`
-- `DATABASE_MAX_IDLE_CONNS`
-- `DATABASE_CONN_MAX_LIFETIME`
-- `REDIS_HOST`
-- `REDIS_PORT`
-- `REDIS_PASSWORD`
-- `REDIS_DB`
-- `LOGGER_LEVEL`
-- `LOGGER_FORMAT`
-- `JWT_SECRET`
-- `JWT_EXPIRATION`
-
-дополнение:
-
-- `RATE_LIMIT_ENABLED` — включить/выключить лимит (true/false)
-- `RATE_LIMIT_REQUESTS_PER_MINUTE` — максимальное число запросов в минуту (100)
-- `EMAIL_SERVICE_URL` — URL внешнего email-сервиса
-- `EMAIL_SERVICE_TIMEOUT` — таймаут HTTP-запроса к email-сервису (5s)
-- `PROMETHEUS_PORT` — порт Prometheus UI (9090)
-
-Чтобы изменить порт приложения локально, нужно поменять `SERVER_PORT` в `.env` и перезапустите контейнеры через `make up`.
-
-## Rate Limiting
-
-На все защищённые эндпоинты (требующие JWT) наложено ограничение: **100 запросов в минуту на одного пользователя**. Счётчик хранится в Redis (ключ `rate_limit:{user_id}`). Для неавторизованных запросов лимит не применяется.
-
-При превышении лимита возвращается `429 Too Many Requests`:
+На защищённые эндпоинты наложен лимит 100 запросов/мин на пользователя (Redis INCR/EXPIRE).
 
 ```bash
-# Быстрая серия запросов для проверки
+# Серия быстрых запросов
 for ($i=0; $i -le 100; $i++) {
   curl -s -o $null -w "%{http_code}\n" http://localhost:8080/api/v1/ping \
     -H "Authorization: Bearer $TOKEN"
@@ -625,95 +470,90 @@ curl -i http://localhost:8080/api/v1/ping \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-Ожидаемый ответ:
-
+Ожидаемый ответ при превышении:
 ```
 HTTP/1.1 429 Too Many Requests
 Retry-After: 60
-Content-Type: application/json
-
 {"error":"rate limit exceeded"}
 ```
 
 При недоступности Redis запросы пропускаются (fail open).
 
-## Circuit Breaker (Email Service)
+### 7. Circuit Breaker
 
-Приглашение пользователя в команду (`POST /teams/{id}/invite`) отправляет HTTP-запрос к внешнему email-сервису (по умолчанию `httpbin.org/post`). Вызов обёрнут в `Circuit Breaker` (`gobreaker`).
-
-**Параметры CB:**
-- `MaxRequests: 2` (сколько запросов пропускать в полуоткрытом состоянии)
-- `Interval: 10s` (интервал сброса счётчиков)
-- `Timeout: 30s` (время в разомкнутом состоянии перед переходом в полуоткрытое)
-- Порог размыкания: ≥3 запроса, ≥60% ошибок
-
-**Проверка нормальной работы:**
+Приглашение пользователя обёрнуто в Circuit Breaker (gobreaker). Параметры: MaxRequests=2, Interval=10s, Timeout=30s, порог размыкания ≥3 запроса, ≥60% ошибок.
 
 ```bash
+# Нормальная работа
 curl -i -X POST http://localhost:8080/api/v1/teams/1/invite \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{"email":"user@test.com","role":"member"}'
-# 200 OK — пользователь добавлен, email отправлен (в логах app)
+  -d '{"email":"user3@test.com","role":"member"}'
+# 200 OK — email отправлен (в логах app)
+
+# Проверка размыкания: измените EMAIL_SERVICE_URL на нерабочий адрес
+# EMAIL_SERVICE_URL=http://localhost:9999 в .env, перезапустите
+# После 3+ неудач CB разомкнётся — пользователь добавится в БД,
+# а в логах появится WARN "circuit breaker open, email not sent"
 ```
 
-**Проверка размыкания CB:**
-
-Измените `EMAIL_SERVICE_URL` в `.env` на нерабочий адрес (например, `http://localhost:9999`), перезапустите приложение и сделайте 5+ запросов на приглашение. После размыкания CB запросы перестанут пытаться соединиться с сервером (мгновенный ответ), пользователь всё равно будет добавлен в БД, а в логах появится `WARN circuit breaker open, email not sent`.
-
-## Тестирование
-
-### Unit-тесты (бизнес-логика)
-
-Тесты расположены в `internal/usecase/*_test.go`. Используют `testify/mock` для изоляции от БД и Redis.
-
-**Запуск:**
-```bash
-make test-unit
-# или
-go test -short -count=1 ./internal/usecase/...
-```
-
-Unit-тесты не требуют Docker и выполняются быстро (< 1 сек).
-
-**Покрытие:**
-- `AuthUseCase`: регистрация (успех, дубликат, невалидные данные), логин (успех, неверный пароль, пользователь не найден).
-- `TaskUseCase`: создание задач (успех, неучастник команды, невалидный assignee), RBAC при обновлении (member не может обновить чужую задачу), получение списка (кэш, фильтрация).
-
-### Интеграционные тесты (БД)
-
-Тесты расположены в `internal/repository/mysql/*_test.go`. Используют `testcontainers-go` для поднятия изолированного MySQL в Docker.
-
-**Запуск:**
-```bash
-make test-integration
-# или
-go test -count=1 -run Integration ./internal/repository/mysql/...
-```
-
-**Требования:**
-- Docker Engine (Docker Desktop для Windows/Mac)
-- Порт 3306 не должен быть занят (контейнер использует случайный порт)
-
-**Покрытие:**
-- `TaskRepository.Create` и `GetByID`: проверка корректного маппинга полей.
-- `TaskRepository.GetList`: динамические фильтры (`status`, `assignee_id`) и пагинация (`LIMIT/OFFSET`).
-- `TaskRepository.Update`: обновление задачи через транзакцию.
-- `TaskHistoryRepository`: запись истории с JSON-полями и чтение.
-
-### Запуск всех тестов
+### 8. Prometheus метрики
 
 ```bash
-make test
+curl http://localhost:8080/metrics | grep teamtasks
 ```
 
-### Покрытие кода
+В выводе присутствуют:
+- `teamtasks_http_requests_total{method="GET",path="/health",status="OK"}`
+- `teamtasks_http_request_duration_seconds_bucket{...}`
+- `teamtasks_db_open_connections`
+- `teamtasks_db_in_use_connections`
+- `teamtasks_db_idle_connections`
+
+Prometheus UI доступен на http://localhost:9090 (после `make up`).
+
+### 9. Healthcheck
 
 ```bash
-make test-coverage
-# или
-go test -coverprofile=coverage.out -count=1 ./...
-go tool cover -func=coverage.out
+curl http://localhost:8080/health
 ```
 
-После выполнения будет выведен отчёт с указанием процента покрытия по каждой функции.
+```json
+{"status":"ok","database":"connected","cache":"connected","timestamp":"2026-06-25T00:00:00Z"}
+```
+
+При недоступности MySQL — `503 Service Unavailable`, `"database":"disconnected"`.
+
+---
+
+## Полный пример flow
+
+```bash
+# 1. Регистрация
+curl -s -X POST http://localhost:8080/api/v1/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@test.com","password":"pass123"}'
+
+# 2. Логин
+TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@test.com","password":"pass123"}' | \
+  powershell -Command "$input | ConvertFrom-Json | Select -ExpandProperty token")
+
+# 3. Создание команды
+curl -s -X POST http://localhost:8080/api/v1/teams \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"name":"Dev Team"}'
+
+# 4. Создание задачи
+curl -s -X POST http://localhost:8080/api/v1/tasks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"title":"First task","team_id":1}'
+
+# 5. Просмотр метрик
+curl http://localhost:8080/metrics | head -20
+```
+
+---

@@ -6,7 +6,10 @@ dist/
 tmp/
 .gocache/
 other/
+vendor/
 *.exe
 *.test
 coverage.out
 coverage
+__debug_bin.exe
+*.log
